@@ -1,3 +1,4 @@
+using Avalonia.Controls.Shapes;
 using FluentAvalonia.Core;
 
 namespace BD.WTTS.UI.Views.Controls
@@ -14,7 +15,7 @@ namespace BD.WTTS.UI.Views.Controls
         /// Defines the <see cref="AutoScrollInterval"/> property.
         /// </summary>
         public static readonly StyledProperty<int> AutoScrollIntervalProperty =
-            AvaloniaProperty.Register<CarouselBanner, int>(nameof(AutoScrollInterval), 8000);
+            AvaloniaProperty.Register<CarouselBanner, int>(nameof(AutoScrollInterval), 6000);
 
         /// <summary>
         /// Defines the Avalonia.Controls.ItemsControl.Items property.
@@ -27,6 +28,12 @@ namespace BD.WTTS.UI.Views.Controls
         /// </summary>
         public static readonly StyledProperty<IDataTemplate?> ItemTemplateProperty =
             Carousel.ItemTemplateProperty.AddOwner<CarouselBanner>();
+
+        ///// <summary>
+        ///// Defines the <see cref="GroupView"/> property.
+        ///// </summary>
+        //public static readonly StyledProperty<bool> GroupViewProperty =
+        //    AvaloniaProperty.Register<CarouselBanner, bool>(nameof(GroupView), true);
 
         /// <summary>
         ///  Gets or sets the items to display.
@@ -64,23 +71,32 @@ namespace BD.WTTS.UI.Views.Controls
             set => SetValue(AutoScrollIntervalProperty, value);
         }
 
+        ///// <summary>
+        ///// GroupView
+        ///// </summary>
+        //public bool GroupView
+        //{
+        //    get => GetValue(GroupViewProperty);
+        //    set => SetValue(GroupViewProperty, value);
+        //}
+
         private Timer? _timer;
 
         public CarouselBanner()
         {
             InitializeComponent();
-            Left.Click += (s, e) => SwiperPrevious();
-            Right.Click += (s, e) => SwiperNext();
+            Left.Command = ReactiveCommand.Create(SwiperPrevious);
+            Right.Command = ReactiveCommand.Create(SwiperNext);
 
-            //Carousel[!Carousel.Items] = this[!Items];
-            Carousel[!Carousel.ItemsSourceProperty] = this[!ItemsSourceProperty];
-            Carousel[!Carousel.ItemTemplateProperty] = this[!ItemTemplateProperty];
+            //CarouselControl[!Carousel.Items] = this[!Items];
+            CarouselControl[!Carousel.ItemsSourceProperty] = this[!ItemsSourceProperty];
+            CarouselControl[!Carousel.ItemTemplateProperty] = this[!ItemTemplateProperty];
 
-            Carousel.GetObservable(Carousel.ItemsSourceProperty)
+            CarouselControl.GetObservable(Carousel.ItemCountProperty)
                     .Subscribe(_ => SwipersLoad());
 
-            Carousel.GetObservable(Carousel.SelectedIndexProperty)
-                    .Subscribe(x => SwipersLoad());
+            CarouselControl.GetObservable(Carousel.SelectedIndexProperty)
+                    .Subscribe(_ => SwipersLoad());
 
             this.GetObservable(AutoScrollProperty)
                 .Subscribe(x =>
@@ -106,11 +122,56 @@ namespace BD.WTTS.UI.Views.Controls
                 });
         }
 
+        //protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+        //{
+        //    if (change.Property == ItemsSourceProperty)
+        //    {
+        //        SwipersLoad();
+        //    }
+        //    else if (change.Property == AutoScrollProperty)
+        //    {
+        //        if (change.NewValue is bool x)
+        //        {
+        //            if (x && _timer == null)
+        //            {
+        //                _timer = new Timer(_ =>
+        //                {
+        //                    if (!this.IsPointerOver)
+        //                    {
+        //                        Dispatcher.UIThread.Post(SwiperNext, DispatcherPriority.Background);
+        //                    }
+        //                }, nameof(AutoScroll), AutoScrollInterval, AutoScrollInterval);
+        //            }
+        //            else
+        //            {
+        //                if (_timer != null)
+        //                {
+        //                    _timer.Dispose();
+        //                    _timer = null;
+        //                }
+        //            }
+        //        }
+        //    }
+
+        //    base.OnPropertyChanged(change);
+        //}
+
+        private void CarouselBannerIndexButton_Click(object? sender, RoutedEventArgs e)
+        {
+            if (sender is Button button && button.Tag is int index)
+            {
+                CarouselControl.SelectedIndex = index;
+            }
+        }
+
         private void SwipersLoad()
         {
-            if (Carousel.ItemCount <= 0)
+            if (CarouselControl.ItemCount <= 0)
+            {
+                Swiper.ItemsSource = null;
                 return;
-            if (Carousel.ItemCount == 1)
+            }
+            if (CarouselControl.ItemCount == 1)
             {
                 Left.IsVisible = Right.IsVisible = Swiper.IsVisible = false;
                 return;
@@ -118,12 +179,12 @@ namespace BD.WTTS.UI.Views.Controls
             else
             {
                 Left.IsVisible = Right.IsVisible = Swiper.IsVisible = true;
-                var arr = new string[Carousel.ItemCount];
-                for (var i = 0; i < arr.Length; i++)
+                var arr = new Dictionary<int, string>();
+                for (var i = 0; i < CarouselControl.ItemCount; i++)
                 {
-                    arr[i] = "#ADADAD";
+                    arr.Add(i, "#ADADAD");
                 }
-                var index = Carousel.SelectedIndex < 0 ? 0 : Carousel.SelectedIndex;
+                var index = CarouselControl.SelectedIndex < 0 ? 0 : CarouselControl.SelectedIndex;
                 arr[index] = "#FFFFFF";
 
                 Swiper.ItemsSource = arr;
@@ -132,29 +193,29 @@ namespace BD.WTTS.UI.Views.Controls
 
         private void SwiperNext()
         {
-            if (Carousel.ItemCount < 1)
+            if (CarouselControl.ItemCount < 1)
                 return;
-            if (Carousel.SelectedIndex < Carousel.ItemCount - 1)
+            if (CarouselControl.SelectedIndex < CarouselControl.ItemCount - 1)
             {
-                Carousel.Next();
+                CarouselControl.Next();
             }
             else
             {
-                Carousel.SelectedIndex = 0;
+                CarouselControl.SelectedIndex = 0;
             }
         }
 
         private void SwiperPrevious()
         {
-            if (Carousel.ItemCount < 1)
+            if (CarouselControl.ItemCount < 1)
                 return;
-            if (Carousel.SelectedIndex > 0)
+            if (CarouselControl.SelectedIndex > 0)
             {
-                Carousel.Previous();
+                CarouselControl.Previous();
             }
             else
             {
-                Carousel.SelectedIndex = Carousel.ItemCount - 1;
+                CarouselControl.SelectedIndex = CarouselControl.ItemCount - 1;
             }
         }
     }

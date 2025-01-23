@@ -47,25 +47,31 @@ public sealed partial class GameAccountSettings_ : IGameAccountSettings, ISettin
     /// 账号备注字典
     /// </summary>
     [MPKey(0), MP2Key(0), JsonPropertyOrder(0)]
-    public ConcurrentDictionary<string, string?>? AccountRemarks { get; set; }
+    public ConcurrentDictionary<string, string?>? AccountRemarks { get; set; } = IGameAccountSettings.DefaultAccountRemarks;
 
     /// <summary>
     /// Steam 家庭共享临时禁用
     /// </summary>
     [MPKey(1), MP2Key(1), JsonPropertyOrder(1)]
-    public IReadOnlyCollection<DisableAuthorizedDevice>? DisableAuthorizedDevice { get; set; }
+    public IReadOnlyCollection<DisableAuthorizedDevice>? DisableAuthorizedDevice { get; set; } = IGameAccountSettings.DefaultDisableAuthorizedDevice;
 
     /// <summary>
     /// 启用的账号平台集合
     /// </summary>
     [MPKey(2), MP2Key(2), JsonPropertyOrder(2)]
-    public HashSet<string>? EnablePlatforms { get; set; }
+    public HashSet<string>? EnablePlatforms { get; set; } = IGameAccountSettings.DefaultEnablePlatforms;
 
     /// <summary>
     /// 账号平台设置集合
     /// </summary>
     [MPKey(3), MP2Key(3), JsonPropertyOrder(3)]
-    public ConcurrentDictionary<string, PlatformSettings>? PlatformSettings { get; set; }
+    public ConcurrentDictionary<string, PlatformSettings>? PlatformSettings { get; set; } = IGameAccountSettings.DefaultPlatformSettings;
+
+    /// <summary>
+    /// 是否显示账号用户名
+    /// </summary>
+    [MPKey(4), MP2Key(4), JsonPropertyOrder(4)]
+    public bool IsShowAccountName { get; set; } = IGameAccountSettings.DefaultIsShowAccountName;
 
 }
 
@@ -95,5 +101,10 @@ public static partial class GameAccountSettings
     public static SettingsProperty<string, PlatformSettings, ConcurrentDictionary<string, PlatformSettings>, GameAccountSettings_> PlatformSettings { get; }
         = new(DefaultPlatformSettings);
 
-}
+    /// <summary>
+    /// 是否显示账号用户名
+    /// </summary>
+    public static SettingsStructProperty<bool, GameAccountSettings_> IsShowAccountName { get; }
+        = new(DefaultIsShowAccountName);
 
+}

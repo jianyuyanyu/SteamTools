@@ -3,13 +3,31 @@ using AppResources = BD.WTTS.Client.Resources.Strings;
 // ReSharper disable once CheckNamespace
 namespace BD.WTTS.UI.ViewModels;
 
+[DebuggerDisplay("{DebuggerDisplay,nq}")]
 public class MenuTabItemViewModel : TabItemViewModel, IExplicitHasValue
 {
-    public string ResourceKeyOrName { get; init; } = string.Empty;
+    string DebuggerDisplay => $"{Id} - {Name}";
 
-    public Type? PageType { get; init; }
+    public MenuTabItemViewModel(IPlugin plugin, string resourceKeyOrName)
+    {
+        var pluginUniqueEnglishName = plugin.UniqueEnglishName;
+        Id = $"{pluginUniqueEnglishName}-{resourceKeyOrName}";
+        ResourceKeyOrName = resourceKeyOrName;
+    }
 
-    public bool IsResourceGet { get; init; }
+    internal MenuTabItemViewModel(string resourceKeyOrName)
+    {
+        Id = $"{AssemblyInfo.Trademark}-{resourceKeyOrName}";
+        ResourceKeyOrName = resourceKeyOrName;
+    }
+
+    public string Id { get; }
+
+    public string ResourceKeyOrName { get; }
+
+    public override Type? PageType { get; init; }
+
+    public required bool IsResourceGet { get; init; }
 
     public override string Name => IsResourceGet ? GetString(ResourceKeyOrName) : ResourceKeyOrName;
 

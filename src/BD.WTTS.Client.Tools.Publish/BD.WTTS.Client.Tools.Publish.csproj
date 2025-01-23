@@ -3,7 +3,7 @@
 	<PropertyGroup>
 		<AssemblyName>pub</AssemblyName>
 		<OutputType>Exe</OutputType>
-		<ApplicationIcon>..\..\res\icons\app\v2\Icon.ico</ApplicationIcon>
+		<ApplicationIcon>..\..\res\icons\app\v3\Icon.ico</ApplicationIcon>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<DefineConstants>TOOL_PUBLISH;$(DefineConstants)</DefineConstants>
 	</PropertyGroup>
@@ -122,9 +122,14 @@
 		<PackageReference Include="Squid-Box.SevenZipSharp.Lite" />
 		<PackageReference Include="SharpZipLib" />
 		<PackageReference Include="ZstdNet" />
+		<PackageReference Include="BsDiff" />
 		<PackageReference Include="7-Zip.NativeAssets.Win32" />
 		<PackageReference Include="Portable.BouncyCastle" />
 		<PackageReference Include="System.Security.Cryptography.ProtectedData" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <ProjectReference Include="..\..\ref\WTTS.MicroServices.ClientSDK\src\BD.WTTS.MicroServices.ClientSDK\BD.WTTS.MicroServices.ClientSDK.csproj" />
 	</ItemGroup>
 
 	<Import Project="..\TFM_NETX.props" />

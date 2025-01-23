@@ -15,8 +15,8 @@ public class ContentLoader : ContentControl
     /// <summary>
     /// Defines the <see cref="NoResultMessage"/> property
     /// </summary>
-    public static readonly StyledProperty<string?> NoResultMessageProperty =
-        AvaloniaProperty.Register<ContentLoader, string?>(nameof(NoResultMessage), null);
+    public static readonly StyledProperty<object?> NoResultMessageProperty =
+        AvaloniaProperty.Register<ContentLoader, object?>(nameof(NoResultMessage), null);
 
     /// <summary>
     /// Defines the <see cref="ProgressValue"/> property
@@ -49,10 +49,10 @@ public class ContentLoader : ContentControl
         AvaloniaProperty.Register<ContentLoader, bool>(nameof(IsShowNoResultText), false);
 
     /// <summary>
-    /// Defines the <see cref="ItemsSource"/> property.
+    /// Defines the <see cref="CustomLoadingText"/> property
     /// </summary>
-    public static readonly StyledProperty<IEnumerable?> ItemsSourceProperty =
-        ItemsControl.ItemsSourceProperty.AddOwner<ContentLoader>();
+    public static readonly StyledProperty<string?> CustomLoadingTextProperty =
+        AvaloniaProperty.Register<ContentLoader, string?>(nameof(CustomLoadingText), null);
 
     /// <summary>
     /// 是否正在加载中
@@ -76,9 +76,18 @@ public class ContentLoader : ContentControl
     }
 
     /// <summary>
+    /// 自定义加载提示
+    /// </summary>
+    public string? CustomLoadingText
+    {
+        get => GetValue(CustomLoadingTextProperty);
+        set => SetValue(CustomLoadingTextProperty, value);
+    }
+
+    /// <summary>
     /// 无结果时提示
     /// </summary>
-    public string? NoResultMessage
+    public object? NoResultMessage
     {
         get => GetValue(NoResultMessageProperty);
         set => SetValue(NoResultMessageProperty, value);
@@ -105,54 +114,41 @@ public class ContentLoader : ContentControl
         set => SetValue(MaximumProperty, value);
     }
 
-    public IEnumerable? ItemsSource
-    {
-        get => GetValue(ItemsSourceProperty);
-        set => SetValue(ItemsSourceProperty, value);
-    }
+    //ContentPresenter? contentPresenter;
+
+    //protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
+    //{
+    //    base.OnApplyTemplate(e);
+    //    contentPresenter = e.NameScope.Find<ContentPresenter>("ContentPresenter");
+    //}
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
 
-        if (e.Property == ProgressValueProperty)
-        {
-            if (e.NewValue is double value)
-            {
-                if (value > 0)
-                {
-                    IsIndeterminate = false;
-                    IsLoading = true;
-                }
-                else if (value == Maximum)
-                {
-                    IsLoading = false;
-                }
-            }
-        }
-        else if (e.Property == ItemsSourceProperty)
-        {
-            var items = e.GetNewValue<IEnumerable?>();
-            if (items == null)
-            {
-                IsLoading = true;
-                IsShowNoResultText = false;
-            }
-            else if (items.Count() == 0)
-            {
-                IsLoading = false;
-                IsShowNoResultText = true;
-            }
-            else if (items.Count() != 0)
-            {
-                IsLoading = false;
-                IsShowNoResultText = false;
-            }
-            else
-            {
-                IsLoading = true;
-                IsShowNoResultText = false;
-            }
-        }
+        //if (e.Property == IsLoadingProperty || e.Property == IsShowNoResultTextProperty)
+        //{
+        //    if (!IsLoading && !IsShowNoResultText && contentPresenter != null && contentPresenter.Content is ItemsPresenter itemsPresenter)
+        //    {
+        //        itemsPresenter.InvalidateMeasure();
+        //        itemsPresenter.InvalidateArrange();
+        //        itemsPresenter.UpdateLayout();
+        //    }
+        //}
+        //if (e.Property == ProgressValueProperty)
+        //{
+        //    if (e.NewValue is double value)
+        //    {
+        //        if (value > 0)
+        //        {
+        //            IsIndeterminate = false;
+        //            IsLoading = true;
+        //        }
+        //        else if (value == Maximum)
+        //        {
+        //            IsLoading = false;
+        //        }
+        //    }
+        //}
     }
 }

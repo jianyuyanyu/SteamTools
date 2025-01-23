@@ -7,9 +7,6 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
     public override string Name => Strings.GameList;
 
     [Reactive]
-    public bool IsOpenFilter { get; set; }
-
-    [Reactive]
     public bool IsInstalledFilter { get; set; }
 
     [Reactive]
@@ -27,8 +24,6 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
 
     [Reactive]
     public string? SearchText { get; set; }
-
-    public bool IsSteamAppsEmpty => !SteamConnectService.Current.SteamApps.Items.Any_Nullable() && !SteamConnectService.Current.IsLoadingGameList;
 
     [Reactive]
     public ObservableCollection<EnumModel<SteamAppType>>? AppTypeFiltres { get; set; }
@@ -53,6 +48,8 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
     public ICommand UnlockAchievement_ClickCommand { get; }
 
     public ICommand NavAppToSteamViewCommand { get; }
+
+    public ICommand NavAppScreenshotToSteamViewCommand { get; }
 
     public ICommand OpenFolderCommand { get; }
 

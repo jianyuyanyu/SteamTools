@@ -9,33 +9,50 @@ public partial class AuthenticatorItem : UserControl
     public AuthenticatorItem()
     {
         InitializeComponent();
+
+        ToggleEye.Tapped += AuthenticatorItem_Tapped;
+        this.DoubleTapped += AuthenticatorItem_DoubleTapped;
     }
 
-    protected override void OnPointerPressed(PointerPressedEventArgs e)
-    {
-        base.OnPointerPressed(e);
-
-        if (e.GetCurrentPoint(e.Source as Visual).Properties.PointerUpdateKind == PointerUpdateKind.LeftButtonPressed)
-        {
-            if (DataContext is AuthenticatorItemModel authenticatorItemModel)
-            {
-                authenticatorItemModel.OnPointerLeftPressed();
-            }
-        }
-        // else if (e.GetCurrentPoint(e.Source as Visual).Properties.PointerUpdateKind == PointerUpdateKind.RightButtonPressed)
-        // {
-        //     if (DataContext is AuthenticatorItemModel authenticatorItemModel)
-        //     {
-        //         authenticatorItemModel.OnPointerRightPressed();
-        //     }
-        // }
-    }
-
-    async void InputElement_OnTapped(object? sender, TappedEventArgs e)
+    private async void AuthenticatorItem_DoubleTapped(object? sender, TappedEventArgs e)
     {
         if (DataContext is AuthenticatorItemModel authenticatorItemModel)
         {
-            await authenticatorItemModel.OnTextPanelOnTapped();
+            await authenticatorItemModel.CopyCode();
         }
     }
+
+    private void AuthenticatorItem_Tapped(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is AuthenticatorItemModel authenticatorItemModel)
+        {
+            //await authenticatorItemModel.CopyCode();
+            authenticatorItemModel.Tapped();
+        }
+    }
+
+    //protected override void OnPointerPressed(PointerPressedEventArgs e)
+    //{
+    //    base.OnPointerPressed(e);
+
+    //    if (DataContext is AuthenticatorItemModel authenticatorItemModel)
+    //    {
+    //        if (e.GetCurrentPoint(e.Source as Visual).Properties.PointerUpdateKind == PointerUpdateKind.LeftButtonPressed)
+    //        {
+    //            authenticatorItemModel.Tapped();
+    //        }
+    //        // else if (e.GetCurrentPoint(e.Source as Visual).Properties.PointerUpdateKind == PointerUpdateKind.RightButtonPressed)
+    //        // {
+    //        //      authenticatorItemModel.OnPointerRightPressed();
+    //        // }
+    //    }
+    //}
+
+    //async void InputElement_OnTapped(object? sender, TappedEventArgs e)
+    //{
+    //    if (DataContext is AuthenticatorItemModel authenticatorItemModel)
+    //    {
+    //        await authenticatorItemModel.OnTextPanelOnTapped();
+    //    }
+    //}
 }

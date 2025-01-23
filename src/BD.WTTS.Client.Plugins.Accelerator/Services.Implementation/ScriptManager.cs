@@ -80,7 +80,7 @@ public sealed class ScriptManager : GeneralHttpClientFactory, IScriptManager
                 script.MatchDomainNames = string.IsNullOrEmpty(matchs) ? includes : matchs;
                 // 忽略脚本 Enable 启动标签默认启动
                 //var enable = Regex.Match(userScript, string.Format(DescRegex, "@Enable"), RegexOptions.IgnoreCase).GetValue(s => s.Success == true);
-                script.Disable = true;
+                script.Disable = false;
                 //script.Enable = bool.TryParse(enable, out var e) && e;
                 return script;
             }
@@ -134,24 +134,45 @@ public sealed class ScriptManager : GeneralHttpClientFactory, IScriptManager
                     if (jsSaveInfo.Exists)
                     {
                         if (isNoRepeat)
+                        {
                             jsSaveInfo.Delete();
+                            fileInfo.CopyTo(jsSavePath);
+                        }
                     }
                     else
                     {
                         fileInfo.CopyTo(jsSavePath);
                     }
-                    if (oldInfo != null && oldInfo.LocalId > 0)
+                    if (oldInfo != null)
                     {
-                        info.LocalId = oldInfo.LocalId;
-                        info.Id = oldInfo.Id;
-                        info.Order = oldInfo.Order;
-                        if (isNoRepeat)
+                        //本地DTO
+                        if (oldInfo.LocalId > 0)
                         {
-                            var state = await DeleteScriptAsync(oldInfo, false);
-                            if (!state.IsSuccess)
+                            info.LocalId = oldInfo.LocalId;
+                            info.Id = oldInfo.Id;
+                            info.Order = oldInfo.Order;
+                            info.IconUrl = oldInfo.IconUrl;
+                            if (isNoRepeat)
                             {
-                                return ApiRspHelper.Fail<ScriptDTO?>(AppResources.Script_FileDeleteError_.Format(oldInfo.FilePath));
+                                var state = await DeleteScriptAsync(oldInfo, false);
+                                if (!state.IsSuccess)
+                                {
+                                    return ApiRspHelper.Fail<ScriptDTO?>(AppResources.Script_FileDeleteError_.Format(oldInfo.FilePath));
+                                }
                             }
+                        }
+                        else
+                        {
+                            //在线 DTO 返回值
+                            info.SourceLink = oldInfo.SourceLink;
+                            info.UpdateLink = oldInfo.UpdateLink;
+                            info.DownloadLink = oldInfo.DownloadLink;
+                            info.IconUrl = oldInfo.IconUrl;
+                            info.Describe = oldInfo.Describe;
+                            info.UpdateTime = oldInfo.UpdateTime;
+                            info.AccelerateProjects = oldInfo.AccelerateProjects;
+                            info.Version = oldInfo.Version;
+                            info.Name = oldInfo.Name;
                         }
                     }
                     if (pid.HasValue)
@@ -349,16 +370,89 @@ public sealed class ScriptManager : GeneralHttpClientFactory, IScriptManager
     }
 
     /// <summary>
+    /// 版本升级 检查数据库 数据 是否正确 不正确删除重新打包缓存文件
+    /// </summary>
+    /// <param name="list"></param>
+    /// <returns></returns>
+    public async Task<IEnumerable<ScriptDTO>> CheckFiles(IEnumerable<ScriptDTO> list)
+    {
+        var scripts = list.ToList();
+        foreach (var item in list)
+        {
+            if (!CheckFile(item))
+            {
+                var temp = await DeleteScriptAsync(item);
+                scripts.Remove(item);
+                if (temp.IsSuccess)
+                {
+                    //$"脚本:{item.Name}_文件丢失已删除"
+                    Toast.Show(ToastIcon.Warning, Strings.Script_NoFile_.Format(item.Name));
+                }
+                else
+                {
+                    //toast.Show($"脚本:{item.Name}_文件丢失，删除失败去尝试手动删除");
+                    Toast.Show(ToastIcon.Error, Strings.Script_NoFileDeleteError_.Format(item.Name));
+                }
+                continue;
+            }
+
+            //检查缓存文件夹如果不是  IScriptManager.DirName_Build 替换成 IScriptManager.DirName_Build 开头
+            if (!item.CachePath.StartsWith($"{IScriptManager.DirName_Build}{Path.DirectorySeparatorChar}"))
+            {
+                var oldCachePath = Path.Combine(Plugin.Instance.CacheDirectory, item.CachePath);
+                item.CachePath = Path.Combine(IScriptManager.DirName_Build, item.FileName!);
+                if (File.Exists(oldCachePath))
+                {
+                    File.Delete(oldCachePath);
+                }
+                await TryReadFileAsync(item, true);
+                //清理 脚本内容 后续 IPC 传递 插件进程读取。
+                //item.Content = string.Empty;
+                await scriptRepository.SaveScriptCachePathAsync(item, default);
+            }
+            else
+            {
+                var cachePath = Path.Combine(Plugin.Instance.CacheDirectory, item.CachePath);
+                var file = new FileInfo(cachePath);
+                //检查缓存文件是否为空 为空则 刷新
+                if (file.Exists)
+                {
+                    if (file.Length == 0)
+                    {
+                        file.Delete();
+                        await TryReadFileAsync(item, true);
+                        //清理 脚本内容 后续 IPC 传递 插件进程读取。
+                        //item.Content = string.Empty;
+                    }
+                }
+                else
+                {
+                    await TryReadFileAsync(item, true);
+                    //item.Content = string.Empty;
+
+                }
+            }
+        }
+        return scripts;
+    }
+
+    public bool CheckFile(ScriptDTO item)
+    {
+        return File.Exists(Path.Combine(Plugin.Instance.AppDataDirectory, item.FilePath));
+    }
+
+    /// <summary>
     /// 修改为仅尝试判断文件是否存在
     /// </summary>
     /// <param name="item"></param>
+    /// <param name="isReadContent"></param>
     /// <returns></returns>
-    public async Task<ScriptDTO> TryReadFileAsync(ScriptDTO item)
+    public async Task<ScriptDTO> TryReadFileAsync(ScriptDTO item, bool isReadContent = false)
     {
         var cachePath = Path.Combine(Plugin.Instance.CacheDirectory, item.CachePath);
         if (File.Exists(cachePath))
         {
-            //item.Content = File.ReadAllText(cachePath);
+            item.Content = File.ReadAllText(cachePath);
         }
         else
         {
@@ -366,7 +460,10 @@ public sealed class ScriptManager : GeneralHttpClientFactory, IScriptManager
             var infoPath = Path.Combine(Plugin.Instance.AppDataDirectory, item.FilePath);
             if (File.Exists(infoPath))
             {
-                //item.Content = File.ReadAllText(infoPath);
+                if (isReadContent)
+                {
+                    item.Content = File.ReadAllText(infoPath);
+                }
                 if (!await BuildScriptAsync(item, fileInfo, item.IsCompile))
                 {
                     toast.Show(ToastIcon.Error, AppResources.Script_ReadFileError_.Format(item.Name));

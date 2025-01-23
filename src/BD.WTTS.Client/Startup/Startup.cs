@@ -28,12 +28,13 @@ public abstract partial class Startup
     }
 
 #if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
-    readonly string[]? args;
+    string[]? args;
 
     public Startup(string[]? args = null)
     {
         // 从 Main 函数中启动传递 string[] args，从其他地方启动传递 null
         this.args = args;
+        instance = this;
     }
 
 #if WINDOWS
@@ -48,6 +49,12 @@ public abstract partial class Startup
         var uri = args.Uri;
         if (uri != null)
         {
+            var urlString = uri.ToString();
+            var argsByCustomUrlScheme = GetArgsByCustomUrlScheme(urlString);
+            if (argsByCustomUrlScheme != null)
+            {
+                return argsByCustomUrlScheme;
+            }
 
         }
         return null;
@@ -77,11 +84,12 @@ public abstract partial class Startup
                         {
                             var handledArgs = HandleProtocolActivation(protocolActivatedEventArgs);
                             if (handledArgs != null)
-                                return handledArgs;
+                                this.args = handledArgs;
                         }
                         break;
                     case ActivationKind.StartupTask:
-                        return IPlatformService.SystemBootRunArguments.Split(' ');
+                        this.args = IPlatformService.SystemBootRunArguments.Split(' ');
+                        break;
                 }
             }
         }
@@ -97,6 +105,32 @@ public abstract partial class Startup
             // Environment.GetCommandLineArgs()[0] 为程序启动进程文件路径
             args = Environment.GetCommandLineArgs().AsSpan();
             args = args[1..];
+        }
+
+        if (args.Length >= 1)
+        {
+            #region CUSTOM_URL_SCHEME
+
+            bool analysisCustomUrlSchemeArgs = true;
+
+#if WINDOWS
+            if (DesktopBridge.IsRunningAsUwp)
+            {
+                // 已由 HandleProtocolActivation 处理
+                analysisCustomUrlSchemeArgs = false;
+            }
+#endif
+
+            if (analysisCustomUrlSchemeArgs)
+            {
+                var argsByCustomUrlScheme = GetArgsByCustomUrlScheme(args[0]);
+                if (argsByCustomUrlScheme != null)
+                {
+                    args = argsByCustomUrlScheme;
+                }
+            }
+
+            #endregion
         }
 
         IsMainProcess = args.IsEmpty;
@@ -130,12 +164,41 @@ public abstract partial class Startup
         }
     }
 
+    #region 自定义协议
+
+    const string customUrlSchemeArgs = $"{Constants.CUSTOM_URL_SCHEME}args";
+    const string customUrlSchemeArgs2 = $"{Constants.CUSTOM_URL_SCHEME}args/";
+
+    static string[]? GetArgsByCustomUrlScheme(string urlString)
+    {
+        if (urlString.StartsWith(customUrlSchemeArgs2, StringComparison.OrdinalIgnoreCase))
+        {
+            return GetArgsByCustomUrlSchemeCore(urlString[customUrlSchemeArgs2.Length..]);
+        }
+        else if (urlString.StartsWith(customUrlSchemeArgs, StringComparison.OrdinalIgnoreCase))
+        {
+            return GetArgsByCustomUrlSchemeCore(urlString[customUrlSchemeArgs.Length..]);
+        }
+        return null;
+    }
+
+    static string[] GetArgsByCustomUrlSchemeCore(string value)
+    {
+        var args = HttpUtility.UrlDecode(value).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return args;
+    }
+
+    #endregion
+
     /// <summary>
     /// 启动应用程序
     /// </summary>
     /// <returns></returns>
     public virtual async Task<int> StartAsync()
     {
+#if DEBUG
+        Console.WriteLine("BaseDirectory: " + AppContext.BaseDirectory);
+#endif
 #if DEBUG && WINDOWS
         if (!IsDesignMode)
         {
@@ -172,7 +235,7 @@ public abstract partial class Startup
             if (!IsDesignMode) // 仅在非设计器中执行
             {
 #if WINDOWS // Windows 需要检查兼容性
-                if (!IsCustomEntryPoint && !CompatibilityCheck(AppContext.BaseDirectory))
+                if (args.Length == 0 && !IsCustomEntryPoint && !CompatibilityCheck(AppContext.BaseDirectory))
                     return 0;
 #elif MACOS // macOS 需要初始化 NSApplication
                 NSApplication.Init();
@@ -186,11 +249,18 @@ public abstract partial class Startup
 
             #region CustomAppDomain 自定义应用程序域
 
-#if WINDOWS
+#if WINDOWS || LINUX
 #if DEBUG
-            // 调试时移动本机库到 native，通常指定了单个 RID(RuntimeIdentifier)
-            // 后本机库将位于程序根目录上否则将位于 runtimes 文件夹中
-            GlobalDllImportResolver.MoveFiles();
+            try
+            {
+                // 调试时移动本机库到 native，通常指定了单个 RID(RuntimeIdentifier)
+                // 后本机库将位于程序根目录上否则将位于 runtimes 文件夹中
+                GlobalDllImportResolver.MoveFiles();
+            }
+            catch
+            {
+
+            }
 #if STARTUP_WATCH_TRACE || DEBUG
             WatchTrace.Record("CustomAppDomain.MoveFiles");
 #endif
@@ -209,7 +279,6 @@ public abstract partial class Startup
                 // 使用 native 文件夹导入解析本机库
                 try
                 {
-                    NativeLibraryPath = GlobalDllImportResolver.GetLibraryPath(null);
                     NativeLibrary.SetDllImportResolver(loadedAssembly, GlobalDllImportResolver.Delegate);
                 }
                 catch
@@ -317,24 +386,40 @@ public abstract partial class Startup
             #region InitFileSystem 初始化文件系统
 
             // 设置 IOPath.AppDataDirectory 与 IOPath.CacheDirectory 的路径
+            try
+            {
 #if MACOS || MACCATALYST || IOS
-            MacCatalystFileSystem.InitFileSystem();
+                MacCatalystFileSystem.InitFileSystem();
 #elif LINUX
-            LinuxFileSystem.InitFileSystem();
+                LinuxFileSystem.InitFileSystem();
 #elif WINDOWS
-            if (isRunningAsUwp)
-            {
-                WindowsRuntimeFileSystem.InitFileSystem();
-            }
-            else
-            {
-                WindowsFileSystem.InitFileSystem();
-            }
+                if (isRunningAsUwp)
+                {
+                    WindowsRuntimeFileSystem.InitFileSystem();
+                }
+                else
+                {
+                    WindowsFileSystem.InitFileSystem();
+                }
 #elif ANDROID
-            FileSystemEssentials.InitFileSystem();
+                FileSystemEssentials.InitFileSystem();
 #else
-            FileSystem2.InitFileSystem();
+                FileSystem2.InitFileSystem();
 #endif
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+#if WINDOWS
+                var mbText =
+$"""
+Failed to initialize FileSystem, access denied.
+{ex}
+""";
+                GlobalExceptionHandler.ShowApplicationCrash(mbText);
+#endif
+                return 401;
+            }
+
             // 设置仓储层数据库文件存放路径
             Repository.DataBaseDirectory = IOPath.AppDataDirectory;
 #if STARTUP_WATCH_TRACE || DEBUG
@@ -458,6 +543,17 @@ public abstract partial class Startup
                 {
 
                 }
+
+#if WINDOWS || LINUX || APP_REVERSE_PROXY
+                try
+                {
+                    VisualStudioAppCenterSDK.UtilsImpl.Instance.OnExit(null, EventArgs.Empty);
+                }
+                catch
+                {
+
+                }
+#endif
 
                 switch (ModuleName)
                 {

@@ -1,6 +1,9 @@
 using dotnetCampus.Ipc.CompilerServices.Attributes;
+
 #if APP_REVERSE_PROXY
+
 using InstanceReverseProxyService = BD.WTTS.Services.Implementation.YarpReverseProxyServiceImpl;
+
 #else
 using InstanceReverseProxyService = BD.WTTS.Services.IReverseProxyService;
 #endif
@@ -48,12 +51,18 @@ public partial interface IReverseProxyService : IDisposable
     Task<StartProxyResult> StartProxyAsync(byte[] reverseProxySettings);
 
     /// <summary>
+    /// 退出进程
+    /// </summary>
+    void Exit();
+
+    /// <summary>
     /// 停止代理服务
     /// </summary>
     /// <returns></returns>
     Task StopProxyAsync();
 
 #if DEBUG
+
     string GetDebugString()
     {
         return $"Pid: {Environment.ProcessId}, Exe: {Environment.ProcessPath}, Asm: {Assembly.GetAssembly(GetType())?.FullName}";
@@ -64,6 +73,7 @@ public partial interface IReverseProxyService : IDisposable
         StartProxyResult r = new(StartProxyResultCode.Exception, new Exception("aaaa"));
         return Task.FromResult(r);
     }
+
 #endif
 }
 
@@ -134,7 +144,7 @@ public partial interface IReverseProxySettings
     /// </summary>
     ushort Socks5ProxyPortId { get; set; }
 
-    #endregion
+    #endregion Socks5
 
     #region TwoLevelAgent(二级代理)
 
@@ -150,9 +160,23 @@ public partial interface IReverseProxySettings
 
     string? TwoLevelAgentPassword { get; set; }
 
-    #endregion
+    #endregion TwoLevelAgent(二级代理)
 
     IPAddress? ProxyDNS { get; set; }
+
+    /// <summary>
+    /// 是否支持 IPv6
+    /// </summary>
+    bool IsSupportIpv6 { get; set; }
+
+    bool UseDoh { get; set; }
+
+    string? CustomDohAddres { get; set; }
+
+    /// <summary>
+    /// 服务端代理令牌
+    /// </summary>
+    string? ServerSideProxyToken { get; set; }
 }
 
 [MP2Obj(SerializeLayout.Explicit)]
@@ -194,7 +218,15 @@ public readonly partial record struct ReverseProxySettings(
     [property:MP2Key(17)]
     string? TwoLevelAgentPassword,
     [property:MP2Key(18)]
-    string? ProxyDNS)
+    string? ProxyDNS,
+    [property:MP2Key(19)]
+    bool IsSupportIpv6,
+    [property:MP2Key(20)]
+    bool UseDoh,
+    [property:MP2Key(21)]
+    string? CustomDohAddres,
+    [property:MP2Key(22)]
+    string? ServerSideProxyToken)
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal IPAddress GetProxyIp() => GetProxyIp(ProxyIp);
@@ -244,6 +276,10 @@ public readonly partial record struct ReverseProxySettings(
         settings.TwoLevelAgentUserName = TwoLevelAgentUserName;
         settings.TwoLevelAgentPassword = TwoLevelAgentPassword;
         settings.ProxyDNS = GetProxyDNS();
+        settings.IsSupportIpv6 = IsSupportIpv6;
+        settings.UseDoh = UseDoh;
+        settings.CustomDohAddres = CustomDohAddres;
+        settings.ServerSideProxyToken = ServerSideProxyToken;
     }
 #endif
 }
@@ -259,13 +295,36 @@ public enum StartProxyResultCode : byte
     IpcCallFailOrDefault = default,
 
     /// <summary>
+    /// 生成证书失败
+    /// </summary>
+    GenerateCertificateFail,
+
+    /// <summary>
+    /// 生成 Cer 文件路径失败
+    /// </summary>
+    GenerateCerFilePathFail,
+
+    /// <summary>
+    /// 获取证书数据失败
+    /// </summary>
+    GetCertificatePackableFail,
+
+    /// <summary>
+    /// 信任证书失败
+    /// </summary>
+    TrustRootCertificateFail,
+
+    GetX509Certificate2Fail,
+
+    /// <summary>
     /// 成功
     /// </summary>
     Ok = 121,
 
     /// <summary>
-    /// 证书安装失败，或未信任
+    /// 证书安装或生成失败，或未信任
     /// </summary>
+    [Obsolete("use GenerateCertificateFail/TrustRootCertificateFail")]
     SetupRootCertificateFail,
 
     /// <summary>
@@ -277,6 +336,11 @@ public enum StartProxyResultCode : byte
     /// 出现未处理的异常
     /// </summary>
     Exception,
+
+    /// <summary>
+    /// 绑定端口错误
+    /// </summary>
+    BindPortError,
 }
 
 /// <summary>

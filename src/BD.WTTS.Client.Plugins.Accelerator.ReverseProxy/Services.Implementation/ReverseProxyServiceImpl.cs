@@ -6,14 +6,15 @@ abstract class ReverseProxyServiceImpl : IReverseProxySettings
     protected const string TAG = "ReverseProxyS";
 
     public ReverseProxyServiceImpl(
-        IDnsAnalysisService dnsAnalyses)
+        DnsAnalysisServiceImpl dnsAnalysisServiceImpl,
+        DnsDohAnalysisService dnsDohAnalysisService)
     {
-        DnsAnalysis = dnsAnalyses;
+        DnsAnalysis = new DnsAnalysisServiceSwitchImpl(this, dnsAnalysisServiceImpl, dnsDohAnalysisService);
     }
 
     public IDnsAnalysisService DnsAnalysis { get; }
 
-    public abstract ICertificateManager CertificateManager { get; }
+    public abstract CertificateManagerImpl CertificateManager { get; }
 
     /// <summary>
     /// 获取或设置当前根证书
@@ -82,6 +83,14 @@ abstract class ReverseProxyServiceImpl : IReverseProxySettings
 
     public IPAddress? ProxyDNS { get; set; }
 
+    public bool IsSupportIpv6 { get; set; }
+
+    public bool UseDoh { get; set; }
+
+    public string? CustomDohAddres { get; set; }
+
+    public string? ServerSideProxyToken { get; set; }
+
     /// <summary>
     /// 获取一个随机的未使用的端口
     /// </summary>
@@ -149,18 +158,31 @@ abstract class ReverseProxyServiceImpl : IReverseProxySettings
         {
             return StartProxyResultCode.DeserializeReverseProxySettingsFail;
         }
-        reverseProxySettings.SetValue(this);
 
-        if (!CertificateManager.IsRootCertificateInstalled)
+        // Linux 如果是443 需要验证 是否允许使用
+        if (OperatingSystem.IsLinux())
         {
-            var isOk = await CertificateManager.SetupRootCertificateAsync();
-            if (!isOk)
+            if (string.IsNullOrWhiteSpace(reverseProxySettings.ProxyIp))
+                return StartProxyResultCode.Exception;
+            if (reverseProxySettings.ProxyMode == ProxyMode.Hosts)
             {
-                return StartProxyResultCode.SetupRootCertificateFail;
+                var inUsePort = SocketHelper.IsUsePort(IPAddress.Parse(reverseProxySettings.ProxyIp!), 443);
+                if (inUsePort)
+                {
+                    return StartProxyResultCode.BindPortError;
+                }
             }
         }
 
+        CheckRootCertificate();
+
+        reverseProxySettings.SetValue(this);
+
         return await StartProxyImpl();
+    }
+
+    protected virtual void CheckRootCertificate()
+    {
     }
 
     protected abstract Task<StartProxyResult> StartProxyImpl();

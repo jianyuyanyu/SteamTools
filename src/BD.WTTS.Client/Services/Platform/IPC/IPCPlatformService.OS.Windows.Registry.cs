@@ -1,18 +1,53 @@
-#if WINDOWS
-
 // ReSharper disable once CheckNamespace
 namespace BD.WTTS.Services;
 
 partial interface IPCPlatformService
 {
 #if !LIB_CLIENT_IPC
-    /// <inheritdoc cref="WindowsPlatformServiceImpl.StartProcessRegedit(string, string, int)"/>
+    /// <inheritdoc cref="WindowsPlatformServiceImpl.StartProcessRegeditAsync(string, string, int)"/>
 #endif
     [SupportedOSPlatform("windows")]
-    void StartProcessRegeditCoreIPC(string path, int millisecondsDelay)
+
+#if !LIB_CLIENT_IPC && WINDOWS
+    async
+#endif
+    Task<byte> StartProcessRegeditCoreIPCAsync(
+        string? markKey,
+        string? markValue,
+        string path,
+        int millisecondsDelay)
     {
-#if !LIB_CLIENT_IPC
-        WindowsPlatformServiceImpl.StartProcessRegeditCore(path, millisecondsDelay);
+        const byte Code_Ok = 200;
+#if !LIB_CLIENT_IPC && WINDOWS
+
+        switch (markKey)
+        {
+            case nameof(WindowsPlatformServiceImpl.SetAsSystemProxyAsync):
+                if (markValue == bool.TrueString)
+                {
+                    WindowsPlatformServiceImpl.SetAsSystemProxyStatus = true;
+                }
+                else if (markValue == bool.FalseString)
+                {
+                    WindowsPlatformServiceImpl.SetAsSystemProxyStatus = false;
+                }
+                break;
+            case nameof(WindowsPlatformServiceImpl.SetAsSystemPACProxyAsync):
+                if (markValue == bool.TrueString)
+                {
+                    WindowsPlatformServiceImpl.SetAsSystemPACProxyStatus = true;
+                }
+                else if (markValue == bool.FalseString)
+                {
+                    WindowsPlatformServiceImpl.SetAsSystemPACProxyStatus = false;
+                }
+                break;
+        }
+
+        await WindowsPlatformServiceImpl.StartProcessRegeditCoreAsync(path, millisecondsDelay);
+        return Code_Ok;
+#else
+        return Task.FromResult(Code_Ok);
 #endif
     }
 
@@ -22,7 +57,7 @@ partial interface IPCPlatformService
     [SupportedOSPlatform("windows")]
     string? ReadRegistryKey(string encodedPath, RegistryView view = Registry2.DefaultRegistryView)
     {
-#if !LIB_CLIENT_IPC
+#if !LIB_CLIENT_IPC && WINDOWS
         var result = WindowsPlatformServiceImpl.ReadRegistryKeyCore(encodedPath, view);
         return result;
 #else
@@ -34,7 +69,7 @@ partial interface IPCPlatformService
     [SupportedOSPlatform("windows")]
     bool SetRegistryKey(string encodedPath, RegistryView view, string? value = null)
     {
-#if !LIB_CLIENT_IPC
+#if !LIB_CLIENT_IPC && WINDOWS
         var result = WindowsPlatformServiceImpl.SetRegistryKeyCore(encodedPath, view, value);
         return result;
 #else
@@ -46,7 +81,7 @@ partial interface IPCPlatformService
     [SupportedOSPlatform("windows")]
     bool DeleteRegistryKey(string encodedPath, RegistryView view = Registry2.DefaultRegistryView)
     {
-#if !LIB_CLIENT_IPC
+#if !LIB_CLIENT_IPC && WINDOWS
         var result = WindowsPlatformServiceImpl.DeleteRegistryKeyCore(encodedPath, view);
         return result;
 #else
@@ -100,5 +135,3 @@ public static partial class IPCPlatformServiceExtensions
 
     #endregion
 }
-
-#endif

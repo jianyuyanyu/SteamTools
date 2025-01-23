@@ -15,9 +15,12 @@ static class DotNetRuntimeHelper
         try
         {
             var value = Environment.GetEnvironmentVariable(EnvName_DotNetRoot);
-            // C:\Program Files\dotnet\shared\Microsoft.NETCore.App\7.0.7\System.Private.CoreLib.dll
-            var location = typeof(object).Assembly.Location;
-            value = Path.GetFullPath(Path.Combine(location, "..", "..", "..", ".."));
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                // C:\Program Files\dotnet\shared\Microsoft.NETCore.App\7.0.7\System.Private.CoreLib.dll
+                var location = typeof(object).Assembly.Location;
+                value = Path.GetFullPath(Path.Combine(location, "..", "..", "..", ".."));
+            }
             return value;
         }
         catch
@@ -28,6 +31,9 @@ static class DotNetRuntimeHelper
 
     public static void AddEnvironment(ProcessStartInfo psi)
     {
+        psi.Environment.TryAdd("DOTNET_gcServer", "0");
+        psi.Environment.TryAdd("DOTNET_GCConserveMemory", "9");
+
         var rootValue = dotnetRoot.Value;
         if (rootValue != null)
         {

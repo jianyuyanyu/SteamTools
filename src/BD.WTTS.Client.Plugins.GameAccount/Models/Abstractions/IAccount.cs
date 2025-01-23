@@ -1,12 +1,12 @@
 namespace BD.WTTS.Models;
 
-public interface IAccount
+public interface IAccount : IReactiveObject
 {
     string? DisplayName { get; }
 
     string? AliasName { get; set; }
 
-    string? AccountId { get; set; }
+    string AccountId { get; set; }
 
     string? AccountName { get; set; }
 
@@ -21,4 +21,6 @@ public interface IAccount
     ThirdpartyPlatform Platform { get; init; }
 
     string? PlatformName { get; init; }
+
+    string? AvatarMedium { get; set; }
 }

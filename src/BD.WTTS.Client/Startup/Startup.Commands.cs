@@ -1,6 +1,7 @@
 #if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
 using System.CommandLine;
 using System.CommandLine.NamingConventionBinder;
+using BD.WTTS.Services;
 using dotnetCampus.Ipc.CompilerServices.GeneratedProxies;
 #endif
 
@@ -47,13 +48,15 @@ partial class Startup // 自定义控制台命令参数
         devtools.AddOption(new Option<bool>("-disable_gpu", () => false, "禁用 GPU 硬件加速"));
         devtools.AddOption(new Option<bool>("-use_wgl", () => false, "使用 Native OpenGL（仅 Windows）"));
         devtools.AddOption(new Option<bool>("-use_localhost", () => false, "使用本机服务端"));
-        devtools.Handler = CommandHandler.Create((bool disable_gpu, bool use_wgl, bool use_localhost) =>
+        devtools.AddOption(new Option<bool>("-steamrun", () => false, "Steam 内启动"));
+        devtools.Handler = CommandHandler.Create((bool disable_gpu, bool use_wgl, bool use_localhost, bool steamrun) =>
         {
 #if DEBUG
             AppSettings.UseLocalhostApiBaseUrl = use_localhost;
 #endif
             IsMainProcess = true;
             IsConsoleLineToolProcess = false;
+            IsSteamRun = steamrun;
 
             overrideLoggerMinLevel = LogLevel.Debug;
             IApplication.EnableDevtools = true;
@@ -65,11 +68,14 @@ partial class Startup // 自定义控制台命令参数
         rootCommand.AddCommand(devtools);
 
         // -clt c -silence
+        // -clt c -steamrun
         var common = new Command("c", "common");
         common.AddOption(new Option<bool>("-silence", "静默启动（不弹窗口）"));
-        common.Handler = CommandHandler.Create((bool silence) =>
+        common.AddOption(new Option<bool>("-steamrun", "Steam 内启动"));
+        common.Handler = CommandHandler.Create((bool silence, bool steamrun) =>
         {
             IsMinimize = silence;
+            IsSteamRun = steamrun;
 
             IsMainProcess = true;
             IsConsoleLineToolProcess = false;
@@ -81,37 +87,44 @@ partial class Startup // 自定义控制台命令参数
         // -clt steam -account
         var steamuser = new Command("steam", "Steam 相关操作");
         steamuser.AddOption(new Option<string>("-account", "指定对应 Steam 用户名"));
-        steamuser.Handler = CommandHandler.Create((string account) =>
+        steamuser.Handler = CommandHandler.Create(async (string account) =>
         {
             if (!string.IsNullOrEmpty(account))
             {
-                Task.Factory.StartNew(async () =>
+#if WINDOWS
+                if (!WindowsPlatformServiceImpl.IsPrivilegedProcess)
                 {
-                    await WaitConfiguredServices;
+                    // 必须使用管理员权限进行操作
+                    await RunSelfAsAdministrator($"-clt steam -account {account}");
+                    return;
+                }
+#endif
 
-                    var steamService = ISteamService.Instance;
-
-                    var users = steamService.GetRememberUserList();
-
-                    var currentuser = users.Where(s => s.AccountName == account).FirstOrDefault();
-
-                    steamService.TryKillSteamProcess();
-
-                    if (currentuser != null)
-                    {
-                        currentuser.MostRecent = true;
-                        steamService.UpdateLocalUserData(users);
-                        steamService.SetCurrentUser(account);
-                    }
-
-                    steamService.StartSteamWithParameter();
-                });
                 RunUIApplication(AppServicesLevel.Steam);
+
+                await WaitConfiguredServices;
+
+                var steamService = ISteamService.Instance;
+
+                var users = steamService.GetRememberUserList();
+
+                var currentuser = users.Where(s => s.AccountName == account).FirstOrDefault();
+
+                await steamService.TryKillSteamProcess();
+
+                if (currentuser != null)
+                {
+                    currentuser.MostRecent = true;
+                    steamService.UpdateLocalUserData(users);
+                    await steamService.SetSteamCurrentUserAsync(account);
+                }
+
+                steamService.StartSteamWithParameter();
             }
         });
         rootCommand.AddCommand(steamuser);
 
-        // -clt app -id 282800
+        // -clt app -id 282800 -achievement
         var run_SteamApp = new Command("app", "运行 Steam 应用");
         run_SteamApp.AddOption(new Option<int>("-id", "指定一个 Steam 游戏 Id"));
         run_SteamApp.AddOption(new Option<bool>("-achievement", "打开成就解锁窗口"));
@@ -119,32 +132,42 @@ partial class Startup // 自定义控制台命令参数
         run_SteamApp.AddOption(new Option<bool>("-silence", "挂运行服务，不加载窗口，内存占用更小"));
         run_SteamApp.Handler = CommandHandler.Create(async (int id, bool achievement, bool cloudmanager) =>
         {
+            int exitCode = default;
             if (id <= 0)
-                return;
+                return -1;
 
             if (cloudmanager || achievement)
             {
                 RunUIApplication(AppServicesLevel.UI |
                     AppServicesLevel.Steam |
-                    AppServicesLevel.HttpClientFactory, null, AssemblyInfo.GameList);
+                    AppServicesLevel.HttpClientFactory, null,
+                    loadModules: AssemblyInfo.GameList);
                 await WaitConfiguredServices;
 
                 if (TryGetPlugins(out var plugins) && plugins.Any_Nullable())
                 {
                     await plugins.First().OnCommandRun(id.ToString(), achievement ? nameof(achievement) : nameof(cloudmanager));
+                    StartUIApplication();
                 }
-
-                StartUIApplication();
+                else
+                {
+                    // 找不到插件，可能该插件已被删除
+                    INotificationService.Instance.Notify(Strings.GameList + " plugin does not exist.", NotificationType.Message);
+                    return 404;
+                }
             }
             else
             {
                 RunUIApplication(AppServicesLevel.Steam);
                 await WaitConfiguredServices;
 
-                SteamConnectService.Current.Initialize(id);
-                TaskCompletionSource tcs = new();
-                await tcs.Task;
+                if (SteamConnectService.Current.Initialize(id))
+                {
+                    await new TaskCompletionSource().Task;
+                }
             }
+
+            return exitCode;
         });
         rootCommand.AddCommand(run_SteamApp);
 
@@ -217,6 +240,54 @@ partial class Startup // 自定义控制台命令参数
         });
         rootCommand.AddCommand(show);
 
+        //#if MACOS
+        //        var macOS = new Command("macoscert", "Mac 平台 Root 权限 操作指令");
+        //        macOS.AddOption(new Option<string>("-i", "安装证书 参数为用户名 因为 Root 启动无法获取指定用户名"));
+        //        macOS.AddOption(new Option<string>("-d", "删除证书"));
+        //        macOS.Handler = CommandHandler.Create((string i, string d) =>
+        //        {
+        //            if (string.IsNullOrWhiteSpace(i) || string.IsNullOrWhiteSpace(i))
+        //                return (int)CommandExitCode.HttpStatusBadRequest;
+        //            if (!string.IsNullOrWhiteSpace(i))
+        //            {
+
+        //                return (int)CommandExitCode.HttpStatusBadRequest;
+        //            }
+        //            if (!string.IsNullOrWhiteSpace(d))
+        //            {
+        //                using var rootCert = X509CertificatePackable.CreateX509Certificate2(CertificateConstants.DefaultPfxFilePath, (string?)null, X509KeyStorageFlags.Exportable);
+        //                return MacCatalystPlatformServiceImpl.RemoveCertificate(rootCert);
+        //            }
+        //            return (int)CommandExitCode.HttpStatusBadRequest;
+        //        });
+        //#endif
+
+#if LINUX
+        // -clt linux -i or -d AppDataDirectory
+        //Linux 可以自定义用户文件夹
+        var linux = new Command("linux", "Linux 平台 Root 权限 操作指令");
+        linux.AddOption(new Option<string>("-ceri", "安装证书 参数为 AppDataDirectory"));
+        linux.AddOption(new Option<string>("-cerd", "删除证书 参数为 AppDataDirectory"));
+        //linux.AddOption(new Option<bool>("-bindProt", "执行允许绑定 443"));
+        linux.Handler = CommandHandler.Create((string ceri, string cerd) =>
+        {
+            if (string.IsNullOrWhiteSpace(ceri) || string.IsNullOrWhiteSpace(ceri))
+                return (int)CommandExitCode.HttpStatusBadRequest;
+            if (!string.IsNullOrWhiteSpace(ceri))
+            {
+                LinuxPlatformServiceImpl.TrustRootCertificateCore(Path.Combine(ceri, CertificateConstants.CerFileName));
+                return (int)CommandExitCode.HttpStatusCodeOk;
+            }
+            if (!string.IsNullOrWhiteSpace(cerd))
+            {
+                LinuxPlatformServiceImpl.RemoveCertificate(Path.Combine(cerd, CertificateConstants.CerFileName));
+                return (int)CommandExitCode.HttpStatusCodeOk;
+            }
+            return (int)CommandExitCode.HttpStatusBadRequest;
+        });
+        rootCommand.AddCommand(linux);
+#endif
+
         // -clt proxy -on
         var proxy = new Command(key_proxy, "启用代理服务，静默启动（不弹窗口）");
         proxy.AddOption(new Option<bool>("-on", "开启代理服务"));
@@ -247,7 +318,7 @@ partial class Startup // 自定义控制台命令参数
             var users = steamService.GetRememberUserList();
 
             var accountRemarks =
-                Ioc.Get<IPartialGameAccountSettings>()?.AccountRemarks;
+                Ioc.Get_Nullable<IPartialGameAccountSettings>()?.AccountRemarks;
 
             var sUsers = users.Select(s =>
             {
@@ -317,6 +388,24 @@ partial class Startup // 自定义控制台命令参数
 #endif
                         ipcProvider.CreateIpcJoint<IPCPlatformService>(platformService);
                         ipcProvider.CreateIpcJoint(hostsFileService);
+
+                        var s = Startup.Instance;
+                        if (s.TryGetPlugins(out var plugins))
+                        {
+
+                            foreach (var plugin in plugins)
+                            {
+                                try
+                                {
+                                    plugin.ConfigureServices(ipcProvider!, s);
+                                }
+                                catch (Exception ex)
+                                {
+                                    //GlobalExceptionHandler.Handler(ex, $"{plugin.UniqueEnglishName}.ConfigureRequiredServices");
+                                }
+                            }
+                        }
+
                     }, new[] { n, p.ToString() });
 
                     return exitCode;
@@ -443,6 +532,17 @@ partial class Startup // 自定义控制台命令参数
             }),
         };
         rootCommand.AddCommand(types);
+    }
+#endif
+
+#if WINDOWS
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    async ValueTask<Process?> RunSelfAsAdministrator(string arguments)
+    {
+        var processPath = Environment.ProcessPath;
+        processPath.ThrowIsNull();
+        var process = await WindowsPlatformServiceImpl.StartAsAdministrator(processPath, arguments);
+        return process;
     }
 #endif
 }

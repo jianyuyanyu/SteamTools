@@ -4,7 +4,7 @@ namespace BD.WTTS.UI.ViewModels;
 
 public partial class ScriptPageViewModel : TabItemViewModel
 {
-    public override string Name => Strings.Welcome;
+    public override string Name => Strings.ScriptConfig;
 
     protected readonly ReadOnlyObservableCollection<ScriptDTO>? _ProxyScripts;
 
@@ -12,15 +12,17 @@ public partial class ScriptPageViewModel : TabItemViewModel
 
     public bool IsProxyScriptsEmpty => !ProxyScripts.Any_Nullable();
 
-    public ICommand EditScriptItemButton { get; }
+    public ICommand EditScriptItemCommand { get; }
 
-    public ICommand RefreshScriptItemButton { get; }
-
-    public ICommand OpenHomeScriptItemButton { get; }
+    public ICommand RefreshScriptItemCommand { get; }
 
     public ICommand ScriptStoreCommand { get; }
 
     public ICommand? AddNewScriptCommand { get; }
+
+    public ICommand? DownloadScriptItemCommand { get; }
+
+    public ICommand? DeleteScriptItemCommand { get; }
 
     public ICommand? RefreshALLScriptCommand { get; }
 }

@@ -1,14 +1,48 @@
 using Avalonia.Controls;
 using FluentAvalonia.UI.Controls;
 using FluentAvalonia.UI.Media.Animation;
+using FluentAvalonia.UI.Navigation;
+using System.Xml.Linq;
 
 namespace BD.WTTS.Services.Implementation;
 
-public class NavigationService
+public sealed class NavigationService : INavigationService
 {
-    public static NavigationService Instance { get; } = new NavigationService();
+    public static NavigationService Instance { get; } = (NavigationService)Ioc.Get<INavigationService>();
 
-    public Control? PreviousPage { get; set; }
+    //public Type? PreviousPage { get; set; }
+
+    public Type? CurrnetPage => _frame?.CurrentSourcePageType;
+
+    public object? GetViewModelToPageContent(object viewModel, bool isCreateInstance = true)
+    {
+        string name;
+
+        if (viewModel is Type t)
+        {
+            name = t.Name;
+        }
+        else
+        {
+            name = viewModel.GetType().Name;
+        }
+
+        var type = name switch
+        {
+            nameof(DebugPageViewModel) => typeof(DebugPage),
+            nameof(TextBoxWindowViewModel) => typeof(TextInputDialogPage),
+            nameof(MessageBoxWindowViewModel) => typeof(MessageBoxPage),
+            nameof(LoginOrRegisterWindowViewModel) => typeof(LoginOrRegisterPage),
+            _ => null,
+        };
+
+        if (isCreateInstance && type != null)
+        {
+            return Activator.CreateInstance(type);
+        }
+
+        return type;
+    }
 
     public void SetFrame(Frame f)
     {
@@ -20,28 +54,74 @@ public class NavigationService
         _overlayHost = p;
     }
 
-    public void Navigate(Type t)
+    public void Navigate(Type? t, NavigationTransitionEffect effect = NavigationTransitionEffect.None, bool useCache = true)
     {
-        if (_frame?.Content?.GetType() != t)
+        if (_frame == null)
+            return;
+
+        var navOptions = new FrameNavigationOptions
         {
-            _frame?.Navigate(t);
+            IsNavigationStackEnabled = useCache,
+            TransitionInfoOverride = GetNavigationTransitionInfo(effect)
+        };
+
+        if (t == null)
+        {
+            navOptions.IsNavigationStackEnabled = false;
+            _frame.NavigateToType(typeof(ErrorPage), null, navOptions);
+            return;
+        }
+
+        if (t.IsSubclassOf(typeof(ViewModelBase)))
+        {
+            var pageType = GetViewModelToPageContent(t, false);
+            t = pageType as Type;
+        }
+
+        if (t == null)
+        {
+            navOptions.IsNavigationStackEnabled = false;
+            _frame.NavigateToType(typeof(ErrorPage), null, navOptions);
+            return;
+        }
+
+        if (_frame.Content?.GetType() != t)
+        {
+            _frame.NavigateToType(t, null, navOptions);
+            //if (!useCache && navOptions.IsNavigationStackEnabled)
+            //{
+            //    _frame.BackStack.Remove(_frame.BackStack.Last());
+            //}
         }
     }
 
-    public void Navigate(Type t, NavigationTransitionInfo? transitionInfo = null)
+    public void GoBack(Type? t = null)
     {
-        if (_frame?.Content?.GetType() != t)
+        if (t == null)
         {
-            _frame?.Navigate(t, null, transitionInfo ?? new SuppressNavigationTransitionInfo());
+            _frame?.GoBack();
+            return;
+        }
+
+        if (t.IsSubclassOf(typeof(ViewModelBase)))
+        {
+            var pageType = GetViewModelToPageContent(t, false);
+            t = pageType as Type;
+        }
+
+        if (t == null)
+        {
+            _frame?.GoBack();
+            return;
+        }
+
+        if (_frame?.CurrentSourcePageType == t)
+        {
+            _frame?.GoBack();
         }
     }
 
-    public void GoBack()
-    {
-        _frame?.GoBack();
-    }
-
-    public void NavigateFromContext(object dataContext, NavigationTransitionInfo? transitionInfo = null)
+    public void NavigateFromContext(object dataContext, NavigationTransitionEffect effect = NavigationTransitionEffect.None)
     {
         if ((_frame?.Content as Control)?.DataContext != dataContext)
         {
@@ -49,7 +129,7 @@ public class NavigationService
             new FluentAvalonia.UI.Navigation.FrameNavigationOptions
             {
                 IsNavigationStackEnabled = true,
-                TransitionInfoOverride = transitionInfo ?? new SuppressNavigationTransitionInfo()
+                TransitionInfoOverride = GetNavigationTransitionInfo(effect)
             });
         }
     }
@@ -65,7 +145,34 @@ public class NavigationService
     public void ClearOverlay()
     {
         _overlayHost?.Children.Clear();
+    }
 
+    private static NavigationTransitionInfo GetNavigationTransitionInfo(NavigationTransitionEffect effect)
+    {
+        NavigationTransitionInfo transitionInfo = effect switch
+        {
+            NavigationTransitionEffect.FromLeft => new SlideNavigationTransitionInfo()
+            {
+                Effect = SlideNavigationTransitionEffect.FromLeft,
+            },
+            NavigationTransitionEffect.FromRight => new SlideNavigationTransitionInfo()
+            {
+                Effect = SlideNavigationTransitionEffect.FromRight,
+            },
+            NavigationTransitionEffect.FromTop => new SlideNavigationTransitionInfo()
+            {
+                Effect = SlideNavigationTransitionEffect.FromTop,
+            },
+            NavigationTransitionEffect.FromBottom => new SlideNavigationTransitionInfo()
+            {
+                Effect = SlideNavigationTransitionEffect.FromBottom,
+            },
+            NavigationTransitionEffect.DrillIn => new DrillInNavigationTransitionInfo(),
+            NavigationTransitionEffect.Entrance => new EntranceNavigationTransitionInfo(),
+            _ => new SuppressNavigationTransitionInfo(),
+        };
+
+        return transitionInfo;
     }
 
     private Frame? _frame;

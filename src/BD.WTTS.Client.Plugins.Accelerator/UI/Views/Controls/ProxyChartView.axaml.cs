@@ -1,11 +1,10 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using LiveChartsCore;
-using LiveChartsCore.Motion;
 using LiveChartsCore.SkiaSharpView;
-using LiveChartsCore.SkiaSharpView.Drawing;
-using SkiaSharp;
+using LiveChartsCore.SkiaSharpView.Avalonia;
 
 namespace BD.WTTS.UI.Views.Controls;
 
@@ -20,10 +19,11 @@ public partial class ProxyChartView : UserControl
         EnableNullSplitting = false,
         DataLabelsSize = 12,
         //Stroke = LiveChartsSkiaSharp.DefaultPaint,
-        YToolTipLabelFormatter = (e) => $"Upload {IOPath.GetDisplayFileSizeString(e.Coordinate.PrimaryValue)}/s",
+        Name = Strings.Upload,
+        YToolTipLabelFormatter = (e) => $"{IOPath.GetDisplayFileSizeString(e.Coordinate.PrimaryValue)}/s",
         Mapping = (rate, point) =>
         {
-            point.Coordinate = new(rate.Timestamp, rate.Rate);
+            return new(rate.Timestamp, rate.Rate);
             //point.PrimaryValue = rate.Rate;
             //point.SecondaryValue = rate.Timestamp;
         }
@@ -37,85 +37,58 @@ public partial class ProxyChartView : UserControl
         LineSmoothness = 1,
         EnableNullSplitting = false,
         DataLabelsSize = 12,
+        Name = Strings.Download,
         //Stroke = LiveChartsSkiaSharp.DefaultPaint,
-        YToolTipLabelFormatter = (e) => $"Download {IOPath.GetDisplayFileSizeString(e.Coordinate.PrimaryValue)}/s",
+        YToolTipLabelFormatter = (e) => $"{IOPath.GetDisplayFileSizeString(e.Coordinate.PrimaryValue)}/s",
         Mapping = (rate, point) =>
         {
-            point.Coordinate = new(rate.Timestamp, rate.Rate);
+            return new(rate.Timestamp, rate.Rate);
             //point.PrimaryValue = rate.Rate;
             //point.SecondaryValue = rate.Timestamp;
         }
     };
 
-    //public ISeries[] Series { get; set; }
-
-    private readonly List<RateTick> writes = new();
-    private readonly List<RateTick> reads = new();
+    private readonly ObservableCollection<RateTick> writes = new();
+    private readonly ObservableCollection<RateTick> reads = new();
 
     public Func<double, string> XFormatter { get; } = timestamp => ((long)timestamp).ToDateTimeS().ToString("HH:mm:ss");
 
     public Func<double, string> YFormatter { get; } = value => $"{IOPath.GetDisplayFileSizeString(value)}/s";
 
+    CancellationTokenSource cancellation = new();
+
+    public static readonly AvaloniaProperty<IEnumerable<ISeries>> SeriesProperty =
+        AvaloniaProperty.Register<CartesianChart, IEnumerable<ISeries>>("Series", Enumerable.Empty<ISeries>(), inherits: true);
+
+    public ObservableCollection<ISeries> Series
+    {
+        get
+        {
+            return (ObservableCollection<ISeries>)GetValue(SeriesProperty);
+        }
+
+        set
+        {
+            SetValue(SeriesProperty, value);
+        }
+    }
+
     public ProxyChartView()
     {
-        LiveCharts.Configure(config =>
-        {
-            config
-                // registers SkiaSharp as the library backend
-                // REQUIRED unless you build your own
-                .AddSkiaSharp();
-            // adds the default supported types
-            // OPTIONAL but highly recommend
-            //.AddDefaultMappers()
-
-            // select a theme, default is Light
-            // OPTIONAL
-            //.AddDarkTheme()
-
-            // In case you need a non-Latin based font, you must register a typeface for SkiaSharp
-            config.HasGlobalSKTypeface(SKFontManager.Default.MatchCharacter('汉')); // <- Chinese // mark
-                                                                                   //.HasGlobalSKTypeface(SKFontManager.Default.MatchCharacter('أ'))  // <- Arabic // mark
-                                                                                   //.HasGlobalSKTypeface(SKFontManager.Default.MatchCharacter('あ')) // <- Japanese // mark
-                                                                                   //.HasGlobalSKTypeface(SKFontManager.Default.MatchCharacter('헬')) // <- Korean // mark
-                                                                                   //.HasGlobalSKTypeface(SKFontManager.Default.MatchCharacter('Ж'))  // <- Russian // mark
-
-            if (App.Instance.Theme != AppTheme.FollowingSystem)
-            {
-                if (App.Instance.Theme == AppTheme.Light)
-                    config.AddLightTheme();
-                else
-                    config.AddDarkTheme();
-            }
-            else
-            {
-                var dps = IPlatformService.Instance;
-                dps.SetLightOrDarkThemeFollowingSystem(false);
-                var isLightOrDarkTheme = dps.IsLightOrDarkTheme;
-                if (isLightOrDarkTheme.HasValue)
-                {
-                    var mThemeFS = IApplication.GetAppThemeByIsLightOrDarkTheme(isLightOrDarkTheme.Value);
-                    if (mThemeFS == AppTheme.Light)
-                        config.AddLightTheme();
-                    else
-                        config.AddDarkTheme();
-                }
-            }
-        });
-
         InitializeComponent();
 
         this.readSeries.Values = reads;
         this.writeSeries.Values = writes;
+        Series = [readSeries, writeSeries];
 
         if (Chart != null)
         {
-            Chart.UpdateFinished += Chart_UpdateFinished;
-            Chart.Series = new ISeries[] { readSeries, writeSeries };
+            //Chart.UpdateFinished += Chart_UpdateFinished;
+            //Chart.Series = new ISeries[] { readSeries, writeSeries };
+            Chart[!CartesianChart.SeriesProperty] = this[!SeriesProperty];
             Chart.XAxes = new Axis[] { new Axis { Labeler = XFormatter } };
             Chart.YAxes = new Axis[] { new Axis { Labeler = YFormatter, MinLimit = 0 } };
         }
-
-        CancellationTokenSource? cancellation = null;
 
         ProxyService.Current.WhenAnyValue(x => x.ProxyStatus)
             .Subscribe(x =>
@@ -123,7 +96,7 @@ public partial class ProxyChartView : UserControl
                 if (x)
                 {
                     cancellation = new CancellationTokenSource();
-                    FlushFlowChartAsync(cancellation.Token);
+                    Task2.InBackground(FlushFlowChartAsync, true);
                 }
                 else
                 {
@@ -138,9 +111,7 @@ public partial class ProxyChartView : UserControl
             });
     }
 
-    private static double GetTimestamp(DateTime dateTime) => dateTime.ToUnixTimeSeconds();
-
-    private class RateTick
+    private struct RateTick
     {
         public double Rate { get; }
 
@@ -153,15 +124,18 @@ public partial class ProxyChartView : UserControl
         }
     }
 
-    private async void FlushFlowChartAsync(CancellationToken token)
+    private void FlushFlowChartAsync()
     {
-        while (!token.IsCancellationRequested)
+        while (!cancellation.IsCancellationRequested)
         {
             try
             {
                 var flowStatistics = IReverseProxyService.Constants.Instance.GetFlowStatistics();
                 if (flowStatistics == null)
+                {
+                    Thread.Sleep(1000);
                     continue;
+                }
 
                 var isAttachedToVisualTree = this.IsAttachedToVisualTree();
 
@@ -174,7 +148,7 @@ public partial class ProxyChartView : UserControl
                     });
                 }
 
-                var timestamp = GetTimestamp(DateTime.Now);
+                var timestamp = DateTime.Now.ToUnixTimeSeconds();
 
                 reads.Add(new RateTick(flowStatistics.ReadRate, timestamp));
                 writes.Add(new RateTick(flowStatistics.WriteRate, timestamp));
@@ -185,34 +159,36 @@ public partial class ProxyChartView : UserControl
                     this.writes.RemoveAt(0);
                 }
 
-                if (Chart != null && isAttachedToVisualTree)
-                    Dispatcher.UIThread.Post(() =>
-                    {
-                        Chart.Series = new ISeries[] { readSeries, writeSeries };
-                    });
+                //if (Chart != null && isAttachedToVisualTree)
+                //{
+                //    Dispatcher.UIThread.Post(() =>
+                //    {
+                //        Chart.Series = new ISeries[] { readSeries, writeSeries };
+                //    });
+                //}
             }
             catch
             {
             }
             finally
             {
-                await Task.Delay(TimeSpan.FromSeconds(1d), CancellationToken.None);
+                Thread.Sleep(1000);
             }
         }
     }
 
-    //解决内存泄露问题
-    //https://github.com/beto-rodriguez/LiveCharts2/issues/1080#issuecomment-1601536016
-    private static void Chart_UpdateFinished(LiveChartsCore.Kernel.Sketches.IChartView<SkiaSharpDrawingContext> chart)
-    {
-        // Chart library leaks PaintTasks
-        if (chart.CoreCanvas != null)
-        {
-            // Periodically clean up drawables, this may cause the chart to blip if the user mouses over it during this time
-            if (chart.CoreCanvas.DrawablesCount > 50)
-            {
-                chart.CoreCanvas.SetPaintTasks(new HashSet<LiveChartsCore.Drawing.IPaint<SkiaSharpDrawingContext>>());
-            }
-        }
-    }
+    ////解决内存泄露问题
+    ////https://github.com/beto-rodriguez/LiveCharts2/issues/1080#issuecomment-1601536016
+    //private static void Chart_UpdateFinished(LiveChartsCore.Kernel.Sketches.IChartView<SkiaSharpDrawingContext> chart)
+    //{
+    //    // Chart library leaks PaintTasks
+    //    if (chart.CoreCanvas != null)
+    //    {
+    //        // Periodically clean up drawables, this may cause the chart to blip if the user mouses over it during this time
+    //        if (chart.CoreCanvas.DrawablesCount > 50)
+    //        {
+    //            chart.CoreCanvas.SetPaintTasks([]);
+    //        }
+    //    }
+    //}
 }

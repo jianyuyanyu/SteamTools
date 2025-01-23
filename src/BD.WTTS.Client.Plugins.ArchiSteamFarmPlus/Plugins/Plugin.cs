@@ -1,3 +1,5 @@
+using BD.WTTS.Properties;
+using BD.WTTS.UI.Views.Pages;
 using CreateHttpHandlerArgs = System.ValueTuple<
     bool,
     System.Net.DecompressionMethods,
@@ -12,20 +14,28 @@ namespace BD.WTTS.Plugins;
 #endif
 public sealed class Plugin : PluginBase<Plugin>, IPlugin
 {
-    const string moduleName = "ArchiSteamFarmPlus";
+    const string moduleName = AssemblyInfo.ArchiSteamFarmPlus;
+
+    public override Guid Id => Guid.Parse(AssemblyInfo.ArchiSteamFarmPlusId);
 
     public sealed override string UniqueEnglishName => moduleName;
 
-    public override string Name => moduleName;
+    public override string Name => BDStrings.ArchiSteamFarmPlus;
 
-    public override IEnumerable<TabItemViewModel>? GetMenuTabItems()
+    protected sealed override string? AuthorOriginalString => null;
+
+    public sealed override string Description => moduleName + " 控制台功能实现";
+
+    public sealed override object? Icon => Resources.asf;
+
+    public override IEnumerable<MenuTabItemViewModel>? GetMenuTabItems()
     {
-        yield return new MenuTabItemViewModel()
+        yield return new MenuTabItemViewModel(this, nameof(BDStrings.ArchiSteamFarmPlus))
         {
-            ResourceKeyOrName = "ArchiSteamFarmPlus",
-            PageType = null,
+            PageType = typeof(MainFramePage),
             IsResourceGet = true,
-            IconKey = "GameConsole",
+            //IconKey = "GameConsole",
+            IconKey = Icon
         };
     }
 
@@ -40,7 +50,7 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
 
     public override void ConfigureRequiredServices(IServiceCollection services, Startup startup)
     {
-        ArchiSteamFarm.Web.WebBrowser.CreateHttpHandlerDelegate = CreateHttpHandler;
+        //ArchiSteamFarm.Web.WebBrowser.CreateHttpHandlerDelegate = CreateHttpHandler;
     }
 
     /// <summary>
@@ -97,5 +107,28 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
     public override void OnAddAutoMapper(IMapperConfigurationExpression cfg)
     {
 
+    }
+
+    public override IEnumerable<(Action<IServiceCollection>? @delegate, bool isInvalid, string name)>? GetConfiguration(bool directoryExists)
+    {
+        yield return GetConfiguration<ASFSettings_>(directoryExists);
+    }
+
+    public override async ValueTask OnExit()
+    {
+        if (ArchiSteamFarmServiceImpl.ASFProcessId.HasValue)
+        {
+            try
+            {
+                var process = Process.GetProcessById(ArchiSteamFarmServiceImpl.ASFProcessId.Value);
+                process.Kill();
+                process.Dispose();
+            }
+            catch (ArgumentException)
+            {
+                // 进程已经退出
+            }
+        }
+        await base.OnExit();
     }
 }

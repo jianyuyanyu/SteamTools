@@ -101,13 +101,13 @@ interface ILaunchAppTestCommand : ICommand
             }
             if (isWindows)
             {
-                var frameworks = node["runtimeOptions"]?["frameworks"]?.AsArray();
-                var desktopNode = frameworks?.FirstOrDefault(x =>
-                    x?["name"]?.GetValue<string>() == "Microsoft.WindowsDesktop.App");
-                if (desktopNode != null)
-                {
-                    frameworks!.Remove(desktopNode);
-                }
+                //var frameworks = node["runtimeOptions"]?["frameworks"]?.AsArray();
+                //var desktopNode = frameworks?.FirstOrDefault(x =>
+                //    x?["name"]?.GetValue<string>() == "Microsoft.WindowsDesktop.App");
+                //if (desktopNode != null)
+                //{
+                //    frameworks!.Remove(desktopNode);
+                //}
             }
             Write(path, stream, node);
         }

@@ -21,7 +21,11 @@ sealed partial class WindowsPlatformServiceImpl : IPlatformService
     /// <summary>
     /// %windir%
     /// </summary>
-    static readonly Lazy<string> _windir = new(() => Environment.GetFolderPath(Environment.SpecialFolder.Windows));
+    static readonly Lazy<string> _windir = new(() =>
+    {
+        var windir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        return windir.ThrowIsNull();
+    });
 
     static readonly Lazy<string> _explorer_exe = new(() => Path.Combine(_windir.Value, "explorer.exe"));
 
@@ -36,7 +40,10 @@ sealed partial class WindowsPlatformServiceImpl : IPlatformService
     /// <param name="args"></param>
     /// <returns></returns>
     public static Process? StartProcessExplorer(string args)
-        => Process2.Start(Explorer, args, workingDirectory: _windir.Value);
+    {
+        var process = Process2.Start(Explorer, args, workingDirectory: _windir.Value);
+        return process;
+    }
 
     /// <summary>
     /// 使用 Explorer 降权运行进程
@@ -120,7 +127,8 @@ sealed partial class WindowsPlatformServiceImpl : IPlatformService
         }
         else
         {
-            return Process2.Start(fileName, arguments);
+            var process = Process2.Start(fileName, arguments);
+            return process;
         }
     }
 

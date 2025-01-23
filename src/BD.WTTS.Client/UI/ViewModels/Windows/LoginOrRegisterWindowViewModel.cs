@@ -10,6 +10,8 @@ public partial class LoginOrRegisterWindowViewModel : WindowViewModel, SendSmsUI
     {
         Title = DisplayName;
 
+        Close = _ => INavigationService.Instance.GoBack(typeof(LoginOrRegisterWindowViewModel));
+
         ChooseChannel = ReactiveCommand.CreateFromTask<string>(async channel_ =>
         {
             if (Enum.TryParse<ExternalLoginChannel>(channel_, out var channel))
@@ -37,12 +39,13 @@ public partial class LoginOrRegisterWindowViewModel : WindowViewModel, SendSmsUI
         ExternalLoginChannels = new(GetFastLoginChannels());
     }
 
-    internal static async Task SuccessAsync(LoginOrRegisterResponse rsp, Action? close = null)
+    internal static async Task SuccessAsync(LoginOrRegisterResponse rsp, Action<bool>? close = null)
     {
         await UserService.Current.RefreshUserAsync();
         var msg = Strings.Success_.Format((rsp?.IsLoginOrRegister ?? false) ? Strings.User_Login : Strings.User_Register);
-        close?.Invoke();
+        close?.Invoke(false);
         Toast.Show(ToastIcon.Success, msg);
+        UserService.Current.RefreshShopToken();
     }
 
     async Task SendSmsAsync() => await this.SendSmsAsync(() => new()

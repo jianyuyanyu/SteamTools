@@ -3,9 +3,9 @@ namespace BD.WTTS.Client.Tools.Publish.Commands;
 interface IGenerateCaCertCommand : ICommand
 {
     const string commandName = "gcert";
-    const string X500DistinguishedNameValue = $"C=CN, S=Hunan, L=Changsha, O=\u6C5F\u82CF\u84B8\u6C7D\u51E1\u661F\u79D1\u6280\u6709\u9650\u516C\u53F8, OU=\u6280\u672F\u90E8, CN=\u6C5F\u82CF\u84B8\u6C7D\u51E1\u661F\u79D1\u6280\u6709\u9650\u516C\u53F8";
+    const string X500DistinguishedNameValue = $"C=CN, S=Hunan, L=Changsha, O=\u5F90\u5DDE\u7E41\u661F\u7F51\u7EDC\u79D1\u6280\u6709\u9650\u516C\u53F8, OU=\u6280\u672F\u90E8, CN=\u5F90\u5DDE\u7E41\u661F\u7F51\u7EDC\u79D1\u6280\u6709\u9650\u516C\u53F8";
 
-    public const int CertificateValidDays = 3650;
+    public const int CertificateValidDays = 365;
 
     public const int KEY_SIZE_BITS = 4096;
 
@@ -39,9 +39,10 @@ interface IGenerateCaCertCommand : ICommand
     /// </summary>
     const string _13Oid = "1.3.6.1.4.1.311.10.3.13";
 
-    static (byte[] pfx, byte[] cer) GenerateCodeSigningCert(string x500DistinguishedNameValue, string password)
+    static (byte[] pfx, byte[] cer, string? csr) GenerateCodeSigningCert(string x500DistinguishedNameValue, string password, bool isCSR = false)
     {
-        if (string.IsNullOrWhiteSpace(password))
+        string? csr = default;
+        if (!isCSR && string.IsNullOrWhiteSpace(password))
             throw new ArgumentOutOfRangeException(nameof(password), password, null);
 
         // https://learn.microsoft.com/zh-cn/windows/win32/appxpkg/how-to-create-a-package-signing-certificate
@@ -73,20 +74,33 @@ interface IGenerateCaCertCommand : ICommand
         using var cert = request.CreateSelfSigned(notBefore, notAfter);
         var pfx = cert.Export(X509ContentType.Pfx, password); // 私钥
         var cer = cert.Export(X509ContentType.Cert); // 公钥
-        return (pfx, cer);
+
+        if (isCSR)
+        {
+            csr = request.CreateSigningRequestPem();
+        }
+
+        return (pfx, cer, csr);
     }
 
     internal static void Handler(int type, string path, string cn, string password)
     {
-        (var pfx, var cer) = type switch
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentOutOfRangeException(nameof(path), path, null);
+
+        (var pfx, var cer, var csr) = type switch
         {
             // 生成 BeyondDimension 代码签名证书
-            1 => GenerateCodeSigningCert(X500DistinguishedNameValue, password),
+            1 => GenerateCodeSigningCert(X500DistinguishedNameValue, password, true),
             // 生成 上传应用商店的 代码签名证书
             2 => GenerateCodeSigningCert($"CN={cn}", password),
             _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
         };
         File.WriteAllBytes(path, pfx);
         File.WriteAllBytes(path.TrimEnd(".pfx", StringComparison.OrdinalIgnoreCase) + ".cer", cer);
+        if (csr != default)
+        {
+            File.WriteAllText(path.TrimEnd(".pfx", StringComparison.OrdinalIgnoreCase) + ".txt", csr);
+        }
     }
 }

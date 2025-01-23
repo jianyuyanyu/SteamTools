@@ -1,3 +1,7 @@
+#if DESIGNER
+using Moq;
+#endif
+
 // ReSharper disable once CheckNamespace
 namespace BD.WTTS;
 
@@ -7,6 +11,35 @@ partial class Program
     [STAThread]
     static int Main(string[] args) // Main 函数需要 STA 线程不可更改为 async Task
     {
+        #region 尝试修正 AppContext.BaseDirectory
+
+        try
+        {
+            var appCtxBaseDir = AppContext.BaseDirectory;
+            var parentDirInfo = Directory.GetParent(appCtxBaseDir);
+            if (parentDirInfo != null)
+            {
+                if (string.Equals(parentDirInfo.Name, "assemblies", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (parentDirInfo.FullName ==
+                        Directory.GetParent(typeof(Program).Assembly.Location)?.FullName)
+                    {
+                        parentDirInfo = parentDirInfo.Parent;
+                        if (parentDirInfo != null)
+                        {
+                            AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", parentDirInfo.FullName);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex);
+        }
+
+        #endregion
+
         instance = new(args);
         var exitCode = instance.StartAsync().GetAwaiter().GetResult();
         return exitCode;
@@ -42,6 +75,14 @@ partial class Program
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static AppBuilder BuildAvaloniaApp()
     {
+#if DESIGNER
+        static object? Fallback(Type serviceType, bool required)
+        {
+            var moq = (Mock)Activator.CreateInstance(typeof(Mock<>).MakeGenericType(serviceType))!;
+            return moq.Object;
+        }
+        Ioc.Fallback = Fallback;
+#endif
         try
         {
             Common.UI.Helpers.UIFrameworkHelper.Init(isAvaloniaUI: true);
@@ -79,18 +120,23 @@ partial class Program
 #endif
                                         .UseSkia()
                                         .LogToTrace()
-                                        .UseReactiveUI()
-                                        .With(new FontManagerOptions
-                                        {
-                                            DefaultFamilyName = UI.App.DefaultFontFamily.Name,
-                                            FontFallbacks = new[]
-                                            {
-                                                new FontFallback
-                                                {
-                                                    FontFamily = UI.App.DefaultFontFamily.Name,
-                                                },
-                                            },
-                                        });
+                                        .UseReactiveUI();
+
+                builder.With(new FontManagerOptions
+                {
+                    DefaultFamilyName = UI.App.DefaultFontFamilyName,
+                    FontFallbacks = new[]
+                    {
+                        new FontFallback
+                        {
+                            FontFamily = UI.App.DefaultFontFamily,
+                        },
+                        new FontFallback
+                        {
+                            FontFamily = FontFamily.Default,
+                        },
+                    },
+                });
 
                 var useGpu = !IApplication.DisableGPU && GeneralSettings.GPU.Value;
 #if WINDOWS
@@ -128,6 +174,10 @@ partial class Program
                 builder.With(new AvaloniaNativePlatformOptions
                 {
                     RenderingMode = GetRenderingMode().ToArray(),
+                });
+                builder.With(new MacOSPlatformOptions
+                {
+                    DisableDefaultApplicationMenuItems = true,
                 });
 #elif LINUX
                 builder.With(new X11PlatformOptions

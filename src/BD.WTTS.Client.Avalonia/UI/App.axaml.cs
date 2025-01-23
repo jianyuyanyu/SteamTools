@@ -1,14 +1,29 @@
+using AngleSharp.Dom;
 using BD.WTTS.Client.Resources;
-using BD.WTTS.Extensions;
 using LiveChartsCore;
 using LiveChartsCore.SkiaSharpView;
 using SkiaSharp;
+using System.Drawing.Drawing2D;
 
 namespace BD.WTTS.UI;
 
 public sealed partial class App : Application
 {
     const string TAG = "AvaApp";
+
+    public App()
+    {
+        Name = AssemblyInfo.Trademark;
+        OpenBrowserCommand = ReactiveCommand.Create<object?>(OpenBrowserCommandCore);
+        CopyToClipboardCommand = ReactiveCommand.Create<object?>(CopyToClipboardCommandCore);
+#if MACOS
+        var menus = new NativeMenu();
+        menus.Add(new NativeMenuItem { Header = Strings.Settings, Command = ReactiveCommand.Create(() => { INavigationService.Instance.Navigate(typeof(SettingsPage)); }) });
+        menus.Add(new NativeMenuItemSeparator());
+        menus.Add(new NativeMenuItem { Header = Strings.Exit, Command = ReactiveCommand.Create(() => { Shutdown(); }) });
+        NativeMenu.SetMenu(this, menus);
+#endif
+    }
 
     /// <summary>
     /// 获取当前主窗口
@@ -42,49 +57,34 @@ public sealed partial class App : Application
         {
             AvaloniaXamlLoader.Load(this);
 
-            //LiveCharts.Configure(config =>
-            //{
-            //    config
-            //        // registers SkiaSharp as the library backend
-            //        // REQUIRED unless you build your own
-            //        .AddSkiaSharp();
-            //    // adds the default supported types
-            //    // OPTIONAL but highly recommend
-            //    //.AddDefaultMappers()
+#if WINDOWS || LINUX || MACOS
+            if (GeneralSettings.MinimizeOnStartup.Value)
+                Startup.Instance.IsMinimize = true;
 
-            //    // select a theme, default is Light
-            //    // OPTIONAL
-            //    //.AddDarkTheme()
+            if (Startup.Instance.IsSteamRun)
+            {
+                try
+                {
+                    Steamworks.Dispatch.OnException = (e) =>
+                    {
+                        Log.Error(nameof(Steamworks), e, "Steamworks.SteamClient OnException.");
+                    };
 
-            //    // In case you need a non-Latin based font, you must register a typeface for SkiaSharp
-            //    config.HasGlobalSKTypeface(SKFontManager.Default.MatchCharacter('汉')); // <- Chinese // mark
-            //    //.HasGlobalSKTypeface(SKFontManager.Default.MatchCharacter('أ'))  // <- Arabic // mark
-            //    //.HasGlobalSKTypeface(SKFontManager.Default.MatchCharacter('あ')) // <- Japanese // mark
-            //    //.HasGlobalSKTypeface(SKFontManager.Default.MatchCharacter('헬')) // <- Korean // mark
-            //    //.HasGlobalSKTypeface(SKFontManager.Default.MatchCharacter('Ж'))  // <- Russian // mark
+                    // Init Client
+                    Steamworks.SteamClient.Init(2425030);
 
-            //    if (Theme != AppTheme.FollowingSystem)
-            //    {
-            //        if (Theme == AppTheme.Light)
-            //            config.AddLightTheme();
-            //        else
-            //            config.AddDarkTheme();
-            //    }
-            //    else
-            //    {
-            //        var dps = IPlatformService.Instance;
-            //        dps.SetLightOrDarkThemeFollowingSystem(false);
-            //        var isLightOrDarkTheme = dps.IsLightOrDarkTheme;
-            //        if (isLightOrDarkTheme.HasValue)
-            //        {
-            //            var mThemeFS = IApplication.GetAppThemeByIsLightOrDarkTheme(isLightOrDarkTheme.Value);
-            //            if (mThemeFS == AppTheme.Light)
-            //                config.AddLightTheme();
-            //            else
-            //                config.AddDarkTheme();
-            //        }
-            //    }
-            //});
+                    //if (Steamworks.SteamClient.IsValid)
+                    //{
+                    //    Steamworks.SteamFriends.SetRichPresence("steam_display", "#Status_AtMainMenu");
+                    //    //var r = Steamworks.SteamFriends.GetRichPresence("steam_display");
+                    //}
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(nameof(Steamworks), ex, "Steamworks.SteamClient Init");
+                }
+            }
+#endif
         }
         catch (Exception ex)
         {
@@ -107,8 +107,24 @@ public sealed partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            MainWindow = InitializeMainWindow?.Invoke(this);
-            desktop.MainWindow = MainWindow ??= new MainWindow();
+            MainWindow = InitializeMainWindow?.Invoke(this) ?? new MainWindow();
+
+            desktop.MainWindow =
+#if !UI_DEMO
+                Startup.Instance.IsMinimize && MainWindow is MainWindow ? null :
+#endif
+                MainWindow;
+
+            if (Startup.Instance.IsMinimize && MainWindow is AppWindow appWindow)
+            {
+                Task2.InBackground(() => appWindow.SplashScreen?.RunTasks(CancellationToken.None));
+            }
+
+            IPlatformService.Instance.SetSystemSessionEnding(() =>
+            {
+                Log.Info("System Shutdown", "Application SafeExit...");
+                Shutdown();
+            });
         }
         else if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)
         {
@@ -181,9 +197,11 @@ public sealed partial class App : Application
     public void InitSettingSubscribe()
     {
         GeneralSettings.TrayIcon.Subscribe(x => InitTrayIcon());
-        UISettings.ThemeAccent.Subscribe(SetThemeAccent);
         UISettings.UseSystemThemeAccent.Subscribe(useSystemThemeAccent
             => SetThemeAccent(useSystemThemeAccent ? bool.TrueString : UISettings.ThemeAccent.Value));
+        UISettings.ThemeAccent.Subscribe(color
+            => SetThemeAccent(UISettings.UseSystemThemeAccent.Value ? bool.TrueString : UISettings.ThemeAccent.Value),
+            !UISettings.UseSystemThemeAccent.Value);
 
         GeneralSettings.AutoRunOnStartup.Subscribe(IApplication.SetBootAutoStart);
 
@@ -212,8 +230,8 @@ public sealed partial class App : Application
     {
         try
         {
-            var fontFamily = IPlatformService.Instance.GetDefaultFontFamily();
-            return FontFamily.Parse(fontFamily);
+            //var fontFamily = IPlatformService.Instance.GetDefaultFontFamily();
+            return FontFamily.Parse(DefaultFontFamilyName);
         }
         catch
         {
@@ -221,7 +239,62 @@ public sealed partial class App : Application
         return FontFamily.Default;
     }
 
+    public const string DefaultFontFamilyName = "avares://BD.WTTS.Client.Avalonia/UI/Assets/Fonts/HarmonyOS_Sans_SC_Regular.ttf#HarmonyOS Sans SC";
+
     static readonly Lazy<FontFamily> _DefaultFontFamily = new(GetDefaultFontFamily);
 
     public static FontFamily DefaultFontFamily => _DefaultFontFamily.Value;
+
+    public ICommand OpenBrowserCommand { get; }
+
+    public async void OpenBrowserCommandCore(object? url)
+    {
+        try
+        {
+            var urlString = url?.ToString();
+            if (string.IsNullOrEmpty(urlString))
+            {
+                Toast.Show(ToastIcon.Warning, "打开链接失败");
+                return;
+            }
+            try
+            {
+                Uri uri = new(urlString);
+                if (uri.Host.EndsWith(Constants.Urls.OfficialWebsiteHost, StringComparison.OrdinalIgnoreCase) &&
+                    uri.Query.EndsWith(Constants.Urls.Komaasharu_IsAuthQuery, StringComparison.OrdinalIgnoreCase))
+                {
+                    await UserService.Current.OpenAuthUrl(urlString);
+                    return;
+                }
+            }
+            catch
+            {
+            }
+            Browser2.Open(urlString);
+        }
+        catch (Exception ex)
+        {
+            Toast.LogAndShowT(ex);
+        }
+    }
+
+    public ICommand CopyToClipboardCommand { get; }
+
+    public async void CopyToClipboardCommandCore(object? text)
+    {
+        try
+        {
+            if (text == null || string.IsNullOrEmpty(text.ToString()))
+            {
+                Toast.Show(ToastIcon.Warning, "复制内容失败");
+                return;
+            }
+            await Clipboard2.SetTextAsync(text.ToString());
+            Toast.Show(ToastIcon.Success, Strings.CopyToClipboard);
+        }
+        catch (Exception ex)
+        {
+            Toast.LogAndShowT(ex);
+        }
+    }
 }

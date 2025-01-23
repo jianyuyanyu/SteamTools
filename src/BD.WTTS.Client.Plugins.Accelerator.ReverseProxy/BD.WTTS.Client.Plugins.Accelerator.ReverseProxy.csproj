@@ -7,9 +7,17 @@
 		<RootNamespace>BD.WTTS</RootNamespace>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<SelfContained>false</SelfContained>
-		<DefineConstants>APP_REVERSE_PROXY;$(DefineConstants)</DefineConstants>
-		<ApplicationIcon>..\..\res\icons\app\v2\Icon.ico</ApplicationIcon>
+		<DefineConstants>APP_REVERSE_PROXY;NONE_UI;$(DefineConstants)</DefineConstants>
 		<ApplicationManifest>Properties\app.manifest</ApplicationManifest>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<ApplicationIcon Condition="'$(Configuration)'=='Release'">..\..\res\icons\app\v3\Icon.ico</ApplicationIcon>
+		<ApplicationIcon Condition="'$(Configuration)'=='Debug'">..\..\res\icons\app\v3\Icon.ico</ApplicationIcon>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="$([MSBuild]::IsOSPlatform('windows')) AND ($(RuntimeIdentifier.StartsWith('win-')) OR $(RuntimeIdentifier) == '')">
+		<DefineConstants>WINDOWS7_0_OR_GREATER;WINDOWS;$(DefineConstants)</DefineConstants>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)'=='Release'">
@@ -52,8 +60,24 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<!-- AppCenter -->
+		<Compile Include="..\VisualStudioAppCenterSDK.cs">
+			<LinkBase>Helpers</LinkBase>
+		</Compile>
+		<Compile Include="..\VisualStudioAppCenterSDK.AppSecret.cs">
+			<LinkBase>Helpers</LinkBase>
+		</Compile>
+	</ItemGroup>
+
+	<ItemGroup>
 		<Compile Include="..\BD.WTTS.Client\Constants\CertificateConstants.cs">
 			<LinkBase>Constants</LinkBase>
+		</Compile>
+		<Compile Include="..\BD.WTTS.Client\Services\Platform\IPlatformService.OS.Linux.Etc.Os_Release.cs">
+			<LinkBase>Services\Platform</LinkBase>
+		</Compile>
+		<Compile Include="..\BD.WTTS.Client\Services\Mvvm\LogConsoleService.Logger.cs">
+			<LinkBase>Services\Mvvm</LinkBase>
 		</Compile>
 	</ItemGroup>
 
@@ -69,6 +93,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="BD.Common" />
+		<PackageReference Include="BD.Common.Repositories.SQLitePCL" />
 		<PackageReference Include="NLog" />
 		<PackageReference Include="System.Linq.Async" />
 		<PackageReference Include="Ae.DNS.Client" />
@@ -76,7 +101,17 @@
 		<PackageReference Include="DnsClient" />
 		<PackageReference Include="Yarp.ReverseProxy" />
 		<PackageReference Include="NLog.Web.AspNetCore" />
-		<PackageReference Include="Aigio.WinDivertSharp" Condition="$(RuntimeIdentifier.StartsWith('win-')) OR $(RuntimeIdentifier) == ''" />
+		<PackageReference Include="Aigio.Any.AppCenter" />
+		<PackageReference Include="Aigio.Any.AppCenter.Analytics" />
+		<PackageReference Include="Aigio.Any.AppCenter.Crashes" />
+		<PackageReference Include="System.Drawing.Common" />
+		<PackageReference Include="System.Runtime.Caching" />
+		<PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />
+		<PackageReference Include="Utf8StringInterpolation" />
+	</ItemGroup>
+
+	<ItemGroup Condition="!$(DefineConstants.Contains('REMOVE_DNS_INTERCEPT')) AND $([MSBuild]::IsOSPlatform('windows')) AND ($(RuntimeIdentifier.StartsWith('win-')) OR $(RuntimeIdentifier) == '')">
+		<PackageReference Include="Aigio.WinDivertSharp" />
 	</ItemGroup>
 
 	<ItemGroup>

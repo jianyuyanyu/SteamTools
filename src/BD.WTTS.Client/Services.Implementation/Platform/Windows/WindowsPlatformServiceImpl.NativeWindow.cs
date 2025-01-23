@@ -1,6 +1,7 @@
 #if WINDOWS
 using PInvoke;
 using System.Windows;
+using Vanara.PInvoke;
 
 // ReSharper disable once CheckNamespace
 namespace BD.WTTS.Services.Implementation;
@@ -10,8 +11,8 @@ partial class WindowsPlatformServiceImpl
     /// <summary>
     /// 拖拽指针获取目标窗口
     /// </summary>
-    /// <param name="action">目标窗口回调</param>
-    public void GetMoveMouseDownWindow(Action<NativeWindowModel> action)
+    /// <param name="updateWindowCallback">目标窗口回调</param>
+    public void GetMoveMouseDownWindow(Action<NativeWindowModel> updateWindowCallback)
     {
         void MouseHook_OnMouseUp(object? sender, PointD p)
         {
@@ -26,11 +27,9 @@ partial class WindowsPlatformServiceImpl
             //Name = Control.MousePosition.X + "," + Control.MousePosition.Y;
             User32.GetCursorPos(out var pointInt);
             var handle = User32.WindowFromPoint(pointInt);
-            Span<char> title = stackalloc char[256];
-            User32.GetWindowText(handle, title); // 得到窗口的标题            
-            Span<char> className = stackalloc char[256];
-            User32.GetClassName(handle, className);
-            // 得得到窗口的句柄 类名
+            var title = User32.GetWindowText(handle); // 得到窗口的标题
+            var className = User32.GetClassName(handle);
+            // 得到窗口的句柄 类名
             //SelectWindow.Title = title.ToString();
             //SelectWindow.ClassName = className.ToString();
             User32.GetWindowThreadProcessId(handle, out int pid);
@@ -38,6 +37,12 @@ partial class WindowsPlatformServiceImpl
             try
             {
                 var process = Process.GetProcessById(pid);
+                if (process.Id == Environment.ProcessId)
+                {
+                    updateWindowCallback?.Invoke(null!);
+                    return;
+                }
+
                 string? path = null;
                 if (process != null)
                 {
@@ -57,7 +62,7 @@ partial class WindowsPlatformServiceImpl
                     process,
                     path,
                     process?.ProcessName);
-                action?.Invoke(window);
+                updateWindowCallback?.Invoke(window);
             }
             catch (Exception e)
             {
@@ -66,6 +71,23 @@ partial class WindowsPlatformServiceImpl
         }
         MouseHook.SetSystemCursor(User32.LoadCursor(IntPtr.Zero, MouseHook.OCR_CROSS).DangerousGetHandle(), MouseHook.OCR_NORMAL);
         MouseHook.OnMouseUp += MouseHook_OnMouseUp;
+    }
+
+    /// <summary>
+    /// 将传入句柄窗口设置无标题栏和标题栏区域按钮
+    /// </summary>
+    /// <param name="window"></param>
+    public void BeautifyTheWindow(nint hWnd)
+    {
+        if (hWnd != nint.Zero)
+        {
+            var windowStyle = User32.GetWindowLong(hWnd, User32.WindowLongIndexFlags.GWL_STYLE);
+
+            // 移除最大化、关闭和最小化按钮
+            windowStyle = windowStyle & ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX & ~WS_CAPTION;
+
+            User32.SetWindowLongPtr(hWnd, User32.WindowLongIndexFlags.GWL_STYLE, windowStyle);
+        }
     }
 
     /// <summary>

@@ -36,12 +36,9 @@ public sealed partial class IPCMainProcessServiceImpl : IPCMainProcessService
 
         static MSEXLogLevel Convert(IPCLogLevel logLevel)
         {
-#if DEBUG
-            return MSEXLogLevel.Critical;
-#else
-            if (logLevel <= IPCLogLevel.Debug) return MSEXLogLevel.Debug;
+            if (logLevel <= IPCLogLevel.Debug)
+                return MSEXLogLevel.Debug;
             return (MSEXLogLevel)logLevel;
-#endif
         }
 
         protected override void Log<TState>(
@@ -151,6 +148,20 @@ public sealed partial class IPCMainProcessServiceImpl : IPCMainProcessService
 #else
             true;
 #endif
+
+#if LINUX 
+        // 构建要执行的 shell 命令
+        var shellStr =
+            $"if [ -x \"{fileName}\" ]; then echo \"文件具有执行权限。\"; else chmod +x \"{fileName}\"; echo \"文件没有执行权限。\"; fi";
+        // Linux 启动子模块前需要判断是否有 Exec 执行权限 
+        Process.Start(Process2.BinBash, new string[]
+        {
+            "-c",
+            shellStr,
+        }).WaitForExit();
+
+#endif
+
         var psi = new ProcessStartInfo
         {
             FileName = fileName,
@@ -161,9 +172,16 @@ public sealed partial class IPCMainProcessServiceImpl : IPCMainProcessService
         psi.ArgumentList.Add(pid.ToString());
         psi.ArgumentList.Add(mSubProcessArgumentIndex2Model.Value);
         configure?.Invoke(psi);
+#if !MACOS
         DotNetRuntimeHelper.AddEnvironment(psi);
-        if (!string.IsNullOrWhiteSpace(Startup.NativeLibraryPath))
-            psi.Environment.TryAdd(IPCSubProcessService.EnvKey_NativeLibraryPath, Startup.NativeLibraryPath);
+#endif
+        var nativeLibraryPath = Startup.NativeLibraryPath;
+        if (!string.IsNullOrWhiteSpace(nativeLibraryPath))
+        {
+            psi.Environment.TryAdd(
+                IPCSubProcessService.EnvKey_NativeLibraryPath,
+                nativeLibraryPath);
+        }
         if (isAdministrator
 #if WINDOWS
             && !WindowsPlatformServiceImpl.IsPrivilegedProcess
@@ -432,6 +450,13 @@ public sealed partial class IPCMainProcessServiceImpl : IPCMainProcessService
         return result.All(static x => x.result);
     }
 
+    public void WriteMessage(string? moduleName, byte[] bytes)
+    {
+#if !ANDROID && !IOS
+        LogConsoleService.Current.WriteMessage(moduleName, bytes);
+#endif
+    }
+
     /// <summary>
     /// 配置服务
     /// </summary>
@@ -439,7 +464,29 @@ public sealed partial class IPCMainProcessServiceImpl : IPCMainProcessService
     void ConfigureServices()
     {
         RegisterService<IPCPlatformService, IPlatformService>();
+#if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
+        IHostsFileService? hostsFileService = Ioc.Get_Nullable<IHostsFileService>();
+        if (hostsFileService != null)
+            RegisterService(hostsFileService);
+#endif
         RegisterService<IPCToastService>(this);
+
+        var s = Startup.Instance;
+        if (s.TryGetPlugins(out var plugins))
+        {
+
+            foreach (var plugin in plugins)
+            {
+                try
+                {
+                    plugin.ConfigureServices(ipcProvider!, s);
+                }
+                catch (Exception ex)
+                {
+                    //GlobalExceptionHandler.Handler(ex, $"{plugin.UniqueEnglishName}.ConfigureRequiredServices");
+                }
+            }
+        }
     }
 
     /// <summary>

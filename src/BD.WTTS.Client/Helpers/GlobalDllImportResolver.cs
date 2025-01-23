@@ -1,4 +1,4 @@
-#if WINDOWS
+#if WINDOWS || LINUX
 //#if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
 // ReSharper disable once CheckNamespace
 namespace BD.WTTS;
@@ -43,6 +43,8 @@ public static partial class GlobalDllImportResolver
             Architecture.Arm64 => "linux-arm64", // 在 64 位 ARM 上运行的 Linux 发行版本，如 Raspberry Pi Model 3 及更高版本上的 Ubuntu 服务器 64 位
             Architecture.Arm => "linux-arm", // 在 ARM 上运行的 Linux 发行版本，如 Raspberry Pi Model 2 及更高版本上的 Raspbian
             Architecture.Armv6 => "linux-armv6",
+            Architecture.LoongArch64 => "linux-loongarch64", // 在龙芯 LoongArch64 上运行的 Linux 发行版本
+            Architecture.RiscV64 => "linux-riscv64", // 在 RISC-V 64 位上运行的 Linux 发行版本
             _ => throw new PlatformNotSupportedException(),
         };
 #else
@@ -68,8 +70,16 @@ public static partial class GlobalDllImportResolver
     //static string GetDllDirectory() => GetLibraryPath();
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static string GetLibraryPath(string? libraryName = null)
-        => Path.Combine(BaseDirectory, "native", RID, libraryName ?? string.Empty);
+    public static string GetLibraryPath(string? libraryName = null, string? baseDirectory = null)
+    {
+        var libraryPath = Path.Combine(baseDirectory ?? BaseDirectory, "native", RID, libraryName ?? string.Empty);
+        if (libraryName != null &&
+            libraryName.StartsWith("WinDivert"))
+        {
+            libraryPath = Path.Combine(IOPath.AppDataDirectory, "native", RID, libraryName ?? string.Empty);
+        }
+        return libraryPath;
+    }
 
     const string fileExtension_ =
 #if WINDOWS
@@ -91,13 +101,42 @@ public static partial class GlobalDllImportResolver
     }
 
     static readonly ConcurrentDictionary<string, string> pairs = new();
+    static readonly ConcurrentDictionary<string, nint> loadNativeLibrarys = new();
+
+    static bool TryLoad(string libraryPath, out nint handle)
+    {
+        if (loadNativeLibrarys.TryGetValue(libraryPath, out handle))
+        {
+            return true;
+        }
+        if (NativeLibrary.TryLoad(libraryPath, out handle))
+        {
+            loadNativeLibrarys.TryAdd(libraryPath, handle);
+            return true;
+        }
+        return false;
+    }
+
+    static bool TryLoad(string libraryPath, Assembly assembly, DllImportSearchPath? searchPath, out nint handle)
+    {
+        if (loadNativeLibrarys.TryGetValue(libraryPath, out handle))
+        {
+            return true;
+        }
+        if (NativeLibrary.TryLoad(libraryPath, assembly, searchPath, out handle))
+        {
+            loadNativeLibrarys.TryAdd(libraryPath, handle);
+            return true;
+        }
+        return false;
+    }
 
     public static nint Delegate(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
         libraryName = libraryName.TrimEnd(fileExtension_, StringComparison.OrdinalIgnoreCase);
 
         if (pairs.TryGetValue(libraryName, out var libraryPath) &&
-            NativeLibrary.TryLoad(libraryPath, out var handle))
+            TryLoad(libraryPath, out var handle))
         {
             return handle;
         }
@@ -118,7 +157,7 @@ public static partial class GlobalDllImportResolver
         {
             var libraryFileName = GetLibraryFileName(libraryName);
             libraryPath = GetLibraryPath(libraryFileName);
-            if (File.Exists(libraryPath) && NativeLibrary.TryLoad(libraryPath, out handle))
+            if (File.Exists(libraryPath) && TryLoad(libraryPath, out handle))
             {
                 pairs[libraryName] = libraryPath;
                 return handle;
@@ -128,7 +167,7 @@ public static partial class GlobalDllImportResolver
             {
                 libraryFileName = $"lib{libraryFileName}";
                 libraryPath = GetLibraryPath(libraryFileName);
-                if (File.Exists(libraryPath) && NativeLibrary.TryLoad(libraryPath, out handle))
+                if (File.Exists(libraryPath) && TryLoad(libraryPath, out handle))
                 {
                     pairs[libraryName] = libraryPath;
                     return handle;
@@ -150,7 +189,7 @@ public static partial class GlobalDllImportResolver
 
         // Otherwise, fallback to default import resolver.
 
-        return NativeLibrary.Load(libraryName, assembly, searchPath);
+        return TryLoad(libraryName, assembly, searchPath, out var handle2) ? handle2 : default;
     }
 
 #if DEBUG

@@ -26,6 +26,8 @@ sealed class SteamServiceImpl2 : SteamServiceBaseImpl, ISteamConnectService
         set => SteamConnectService.Current.IsConnectToSteam = value;
     }
 
+    string? ISteamConnectService.SteamLanguageString => ResourceService.GetCurrentCultureSteamLanguageName();
+
     SourceCache<SteamApp, uint> ISteamConnectService.SteamApps => SteamConnectService.Current.SteamApps;
 
     SourceCache<SteamApp, uint> ISteamConnectService.DownloadApps => SteamConnectService.Current.DownloadApps;
@@ -49,7 +51,7 @@ sealed class SteamServiceImpl2 : SteamServiceBaseImpl, ISteamConnectService
         return platform.StartAsInvoker(fileName, arguments);
     }
 
-    protected sealed override void SetSteamCurrentUser(string userName)
+    public sealed override async ValueTask SetSteamCurrentUserAsync(string userName)
     {
 #if WINDOWS
         if (DesktopBridge.IsRunningAsUwp)
@@ -57,17 +59,46 @@ sealed class SteamServiceImpl2 : SteamServiceBaseImpl, ISteamConnectService
             string contents =
 $"""
 Windows Registry Editor Version 5.00
-; {AssemblyInfo.Trademark} BD.WTTS.Services.Implementation.SteamServiceImpl2.SetSteamCurrentUser
+; {AssemblyInfo.Trademark} BD.WTTS.Services.Implementation.SteamServiceImpl2.SetSteamCurrentUserAsync
 [HKEY_CURRENT_USER\Software\Valve\Steam]
 "AutoLoginUser"="{userName}"
 "RememberPassword"=dword:00000001
 """;
             var path = IOPath.GetCacheFilePath(WindowsPlatformServiceImpl.CacheTempDirName, "SwitchSteamUser", FileEx.Reg);
-            WindowsPlatformServiceImpl.StartProcessRegedit(path, contents);
+            await WindowsPlatformServiceImpl.StartProcessRegeditAsync(path, contents);
             return;
         }
 #endif
-        base.SetSteamCurrentUser(userName);
+        await base.SetSteamCurrentUserAsync(userName);
     }
+
+#if WINDOWS
+    protected sealed override async ValueTask<bool> KillSteamProcess()
+    {
+        if (WindowsPlatformServiceImpl.IsPrivilegedProcess)
+        {
+            return await base.KillSteamProcess();
+        }
+        else
+        {
+            try
+            {
+                var processNames = steamProcess;
+                if (processNames.Any_Nullable())
+                {
+                    var platformService = await IPlatformService.IPCRoot.Instance;
+                    var r = platformService.KillProcesses(processNames);
+                    return r ?? false;
+                }
+            }
+            catch (Exception e)
+            {
+                logger.LogError(e, "KillSteamProcess fail.");
+                return false;
+            }
+        }
+        return true;
+    }
+#endif
 }
 #endif

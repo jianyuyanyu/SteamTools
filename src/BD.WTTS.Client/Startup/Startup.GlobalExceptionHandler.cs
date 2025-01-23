@@ -89,6 +89,17 @@ partial class Startup // 全局异常处理
 #endif
             Logger.Error(ex, message, args);
 
+#if WINDOWS || LINUX || APP_REVERSE_PROXY
+            try
+            {
+                VisualStudioAppCenterSDK.UtilsImpl.Instance.InvokeUnhandledExceptionOccurred?.Invoke(null, ex);
+            }
+            catch
+            {
+
+            }
+#endif
+
 #if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
 
             Startup? s;
@@ -124,6 +135,33 @@ partial class Startup // 全局异常处理
                 }
             }
 #endif
+
+#if WINDOWS
+            var mbText =
+$"""
+{string.Format(message, args)}
+{ex}
+""";
+            ShowApplicationCrash(mbText);
+#endif
         }
+
+#if WINDOWS
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static WPFMessageBoxResult? ShowApplicationCrash(string content)
+        {
+            const string mbTitle = $"Application Crash - {AssemblyInfo.Trademark}";
+            try
+            {
+                return WPFMessageBox.Show(content, mbTitle,
+                    WPFMessageBoxButton.OK,
+                    WPFMessageBoxImage.Error);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+#endif
     }
 }

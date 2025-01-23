@@ -25,8 +25,7 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
         }
 
         IsInstalledFilter = GameLibrarySettings.GameInstalledFilter.Value;
-
-        //IsCloudArchiveFilter = GameLibrarySettings.GameInstalledFilter.Value;
+        IsCloudArchiveFilter = GameLibrarySettings.GameCloudArchiveFilter.Value;
 
         this.WhenValueChanged(x => x.IsInstalledFilter, false)
             .Subscribe(s => GameLibrarySettings.GameInstalledFilter.Value = s);
@@ -61,12 +60,15 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
             .Bind(out _SteamApps)
             .Subscribe(_ =>
             {
-                this.RaisePropertyChanged(nameof(IsSteamAppsEmpty));
+                ////无已安装游戏时，显示提示
+                //if (SteamConnectService.Current.SteamApps.Keys.Any() &&
+                //    IsInstalledFilter && !_SteamApps.Any_Nullable())
+                //{
+                //    IsInstalledFilter = false;
+                //    Toast.Show(ToastIcon.Info, "没有检测到已安装游戏，自动切换全部游戏");
+                //}
                 CalcTypeCount();
             });
-
-        SteamConnectService.Current.WhenAnyValue(x => x.IsLoadingGameList)
-            .Subscribe(_ => this.RaisePropertyChanged(nameof(IsSteamAppsEmpty)));
 
         ShowHideAppCommand = ReactiveCommand.Create(() =>
         {
@@ -82,6 +84,7 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
         ManageCloudArchive_ClickCommand = ReactiveCommand.Create<SteamApp>(ManageCloudArchive_Click);
         UnlockAchievement_ClickCommand = ReactiveCommand.Create<SteamApp>(UnlockAchievement_Click);
         NavAppToSteamViewCommand = ReactiveCommand.Create<SteamApp>(NavAppToSteamView);
+        NavAppScreenshotToSteamViewCommand = ReactiveCommand.Create<SteamApp>(NavAppScreenshotToSteamView);
         OpenFolderCommand = ReactiveCommand.Create<SteamApp>(OpenFolder);
         OpenLinkUrlCommand = ReactiveCommand.Create<string>(async url => await Browser2.OpenAsync(url));
     }
@@ -90,13 +93,7 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
     {
         if (IsFirstActivation && !SteamConnectService.Current.SteamApps.Items.Any())
         {
-            //SteamConnectService.Current.Initialize();
             Task2.InBackground(SteamConnectService.Current.RefreshGamesListAsync);
-
-            //UISettings.GameListGridSize.Subscribe(x =>
-            //{
-            //    SteamConnectService.Current.SteamApps.Refresh();
-            //}).AddTo(this);
         }
         base.Activation();
     }
@@ -193,9 +190,9 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
     public static async void EditAppInfoClick(SteamApp app)
     {
         if (app == null) return;
-        var vm = new EditAppInfoPageViewModel(app);
+        var vm = new EditAppInfoPageViewModel(ref app);
         var result = await IWindowManager.Instance.ShowTaskDialogAsync(vm, Strings.GameList_EditAppInfo,
-            pageContent: new EditAppInfoPage(), okButtonText: Strings.Save, isCancelButton: true);
+            pageContent: new EditAppInfoPage(), okButtonText: Strings.Save, isCancelButton: true, disableScroll: true);
 
         if (result)
         {
@@ -211,7 +208,7 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
     {
         if (!ISteamService.Instance.IsRunningSteamProcess)
         {
-            Toast.Show(ToastIcon.Warning, Strings.GameList_SteamNotRuning);
+            Toast.Show(ToastIcon.Warning, Strings.SteamNotRuning);
             return;
         }
 
@@ -224,7 +221,7 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
     {
         if (!ISteamService.Instance.IsRunningSteamProcess)
         {
-            Toast.Show(ToastIcon.Warning, Strings.GameList_SteamNotRuning);
+            Toast.Show(ToastIcon.Warning, Strings.SteamNotRuning);
             return;
         }
         switch (app.Type)
@@ -236,6 +233,7 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
                 if (result.IsOK())
                 {
                     Toast.Show(ToastIcon.Info, Strings.GameList_RuningWait);
+                    NavAppToSteamView(app);
                     app.StartSteamAppProcess(SteamAppRunType.UnlockAchievement);
                     SteamConnectService.Current.RuningSteamApps.TryAdd(app.AppId, app);
                 }
@@ -298,7 +296,7 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
         try
         {
             GameLibrarySettings.HideGameList.Add(app.AppId, app.DisplayName);
-            SteamConnectService.Current.SteamApps.Remove(app);
+            SteamConnectService.Current.SteamApps.RemoveKey(app.AppId);
 
             Toast.Show(ToastIcon.Success, Strings.GameList_HideAppsSuccess);
         }
@@ -311,6 +309,12 @@ public sealed partial class GameListPageViewModel : TabItemViewModel
     public static void NavAppToSteamView(SteamApp app)
     {
         var url = string.Format(SteamApiUrls.STEAM_NAVGAME_URL, app.AppId);
+        Process2.Start(url, useShellExecute: true);
+    }
+
+    public static void NavAppScreenshotToSteamView(SteamApp app)
+    {
+        var url = string.Format(SteamApiUrls.STEAM_NAVGAMESCREENSHOTS_URL, app.AppId);
         Process2.Start(url, useShellExecute: true);
     }
 

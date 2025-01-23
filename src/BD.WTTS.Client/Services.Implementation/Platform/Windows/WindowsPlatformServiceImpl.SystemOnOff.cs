@@ -11,7 +11,10 @@ partial class WindowsPlatformServiceImpl
     {
         SystemEvents.SessionEnding += (sender, e) =>
         {
-            action.Invoke();
+            if (e.Reason == SessionEndReasons.SystemShutdown)
+            {
+                action.Invoke();
+            }
         };
     }
 
@@ -50,9 +53,18 @@ partial class WindowsPlatformServiceImpl
         }
         else
         {
-            var scheduledTaskService = IScheduledTaskService.Instance;
-            scheduledTaskService.ThrowIsNull();
-            scheduledTaskService.SetBootAutoStart(isAutoStart, name);
+            var isPrivilegedProcess = true;
+            if (IsPrivilegedProcess)
+            {
+                var scheduledTaskService = IScheduledTaskService.Instance;
+                scheduledTaskService.ThrowIsNull();
+                scheduledTaskService.SetBootAutoStart(isAutoStart, name, isPrivilegedProcess: isPrivilegedProcess);
+            }
+            else
+            {
+                var ipc = await IPlatformService.IPCRoot.Instance;
+                ipc.SetBootAutoStart(isAutoStart, name, isPrivilegedProcess: isPrivilegedProcess);
+            }
         }
     }
 

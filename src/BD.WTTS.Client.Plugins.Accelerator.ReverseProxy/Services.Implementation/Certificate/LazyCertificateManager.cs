@@ -14,27 +14,41 @@ sealed class LazyCertificateManager : ICertificateManager
 
     public byte[]? PfxPassword => impl().PfxPassword;
 
-    public X509CertificatePackable RootCertificatePackable { get => impl().RootCertificatePackable; set => impl().RootCertificatePackable = value; }
+    public byte[]? RootCertificatePackable { get => impl().RootCertificatePackable; }
 
+    [Obsolete]
     public bool IsRootCertificateInstalled => impl().IsRootCertificateInstalled;
+
+    public bool? IsRootCertificateInstalled2 => impl().IsRootCertificateInstalled2;
+
+    public bool? GenerateCertificate()
+    {
+        return impl().GenerateCertificate();
+    }
 
     public string? GetCerFilePathGeneratedWhenNoFileExists()
     {
         return impl().GetCerFilePathGeneratedWhenNoFileExists();
     }
 
-    public ValueTask PlatformTrustRootCertificateGuideAsync()
+    public void TrustRootCertificate()
     {
-        return impl().PlatformTrustRootCertificateGuideAsync();
+        impl().TrustRootCertificate();
     }
 
-    public ValueTask<bool> SetupRootCertificateAsync()
+    public bool SetupRootCertificate()
     {
-        return impl().SetupRootCertificateAsync();
+        var r = impl().SetupRootCertificate();
+        return r;
     }
 
     public bool DeleteRootCertificate()
     {
         return impl().DeleteRootCertificate();
+    }
+
+    public string GetCertificateInfo()
+    {
+        return impl().GetCertificateInfo();
     }
 }

@@ -1,15 +1,18 @@
 #if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
 
 // ReSharper disable once CheckNamespace
+using ArchiSteamFarm.Steam;
+using ArchiSteamFarm.Steam.Storage;
+using ArchiSteamFarm.Storage;
 
 namespace BD.WTTS.Services;
 
 /// <summary>
 /// ArchiSteamFarm 服务
 /// </summary>
-public partial interface IArchiSteamFarmService : IArchiSteamFarmHelperService
+public partial interface IArchiSteamFarmService
 {
-    static new IArchiSteamFarmService Instance => Ioc.Get<IArchiSteamFarmService>();
+    static IArchiSteamFarmService Instance => Ioc.Get<IArchiSteamFarmService>();
 
     event Action<string>? OnConsoleWirteLine;
 
@@ -17,15 +20,21 @@ public partial interface IArchiSteamFarmService : IArchiSteamFarmHelperService
 
     bool IsReadPasswordLine { get; }
 
-    DateTimeOffset? StartTime { get; }
+    Process? ASFProcess { get; }
 
     Version CurrentVersion { get; }
+
+    /// <summary>
+    /// 控制台输入
+    /// </summary>
+    /// <param name="data"></param>
+    Task ShellMessageInput(string data);
 
     /// <summary>
     /// 启动 ArchiSteamFarm
     /// </summary>
     /// <param name="args"></param>
-    Task<bool> StartAsync(string[]? args = null);
+    Task<(bool IsSuccess, string IPCUrl)> StartAsync(string[]? args = null);
 
     Task StopAsync();
 
@@ -45,9 +54,13 @@ public partial interface IArchiSteamFarmService : IArchiSteamFarmHelperService
     /// 获取 Bot 只读集合
     /// </summary>
     /// <returns></returns>
-    IReadOnlyDictionary<string, Bot>? GetReadOnlyAllBots();
+    Task<IReadOnlyDictionary<string, Bot>?> GetReadOnlyAllBots();
 
-    GlobalConfig? GetGlobalConfig();
+    Task<GlobalConfig?> GetGlobalConfig();
+
+    Task<bool> SaveBot(string botName, BotConfig botConfig);
+
+    Task<bool> SaveGlobalConfig(GlobalConfig config);
 
     async void CommandSubmit(string? command)
     {
@@ -68,31 +81,40 @@ public partial interface IArchiSteamFarmService : IArchiSteamFarmHelperService
         }
     }
 
-    int CurrentIPCPortValue { get; protected set; }
-
-    int IArchiSteamFarmHelperService.IPCPortValue
-    {
-        get
-        {
-            CurrentIPCPortValue = ASFSettings.IPCPortId.Value;
-            if (CurrentIPCPortValue == default) CurrentIPCPortValue = ASFSettings.DefaultIPCPortIdValue;
-            if (ASFSettings.IPCPortOccupiedRandom.Value)
-            {
-                if (SocketHelper.IsUsePort(CurrentIPCPortValue))
-                {
-                    CurrentIPCPortValue = SocketHelper.GetRandomUnusedPort(IPAddress.Loopback);
-                    return CurrentIPCPortValue;
-                }
-            }
-            return CurrentIPCPortValue;
-        }
-    }
+    int CurrentIPCPortValue { get; }
 
     /// <summary>
     /// 使用弹窗密码框输入自定义密钥并设置与保存
     /// </summary>
     /// <returns></returns>
     Task SetEncryptionKeyAsync();
+
+    Task<IApiRsp> BotResumeAsync(string botNames,
+            CancellationToken cancellationToken = default);
+
+    Task<IApiRsp> BotPauseAsync(string botNames,
+            BotPauseRequest request,
+            CancellationToken cancellationToken = default);
+
+    Task<IApiRsp> BotStopAsync(string botNames,
+            CancellationToken cancellationToken = default);
+
+    Task<IApiRsp> BotStartAsync(string botNames,
+            CancellationToken cancellationToken = default);
+
+    Task<IApiRsp<IReadOnlyDictionary<string, GamesToRedeemInBackgroundResponse>>> BotGetUsedAndUnusedKeysAsync(string botNames,
+            CancellationToken cancellationToken = default);
+
+    Task<IApiRsp> BotRedeemKeyAsync(string botNames,
+            BotGamesToRedeemInBackgroundRequest request,
+            CancellationToken cancellationToken = default);
+
+    Task<IApiRsp> BotResetRedeemedKeysRecordAsync(string botNames,
+            CancellationToken cancellationToken = default);
+
+    Task<IApiRsp> BotDeleteAsync(
+            string botNames,
+            CancellationToken cancellationToken = default);
 }
 
 #endif

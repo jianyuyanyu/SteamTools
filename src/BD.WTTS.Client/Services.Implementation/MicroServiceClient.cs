@@ -6,6 +6,8 @@ sealed class MicroServiceClient : MicroServiceClientBase
 {
     readonly IUserManager userManager;
 
+    internal const string ClientName = ClientName_;
+
     public MicroServiceClient(
         ILoggerFactory loggerFactory,
         IHttpClientFactory clientFactory,
@@ -55,6 +57,16 @@ sealed class MicroServiceClient : MicroServiceClientBase
         if (user != null)
         {
             user.AuthToken = authToken;
+            await userManager.SetCurrentUserAsync(user);
+        }
+    }
+
+    public sealed override async Task SaveShopAuthTokenAsync(JWTEntity authToken)
+    {
+        var user = await userManager.GetCurrentUserAsync();
+        if (user != null)
+        {
+            user.ShopAuthToken = authToken;
             await userManager.SetCurrentUserAsync(user);
         }
     }

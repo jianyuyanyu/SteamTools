@@ -1,7 +1,7 @@
 #if IOS || MACOS || MACCATALYST
 using MobileCoreServices;
 #endif
-using AvaloniaFilePickerFileType = Avalonia.Platform.Storage.FilePickerFileType;
+using APS_FilePickerFileType = Avalonia.Platform.Storage.FilePickerFileType;
 using BaseService = BD.Common.Services.IFilePickerPlatformService;
 using FilePickerFileType = BD.Common.Models.FilePickerFileType;
 using IOpenFileDialogService = BD.Common.Services.IFilePickerPlatformService.IOpenFileDialogService;
@@ -19,78 +19,205 @@ sealed class AvaloniaFilePickerPlatformService : BaseService, IServiceBase, IOpe
     // https://github.com/xamarin/Essentials/blob/1.7.3/Xamarin.Essentials/FilePicker/FilePicker.uwp.cs
     // https://github.com/xamarin/Essentials/blob/1.7.3/Xamarin.Essentials/FileSystem/FileSystem.shared.cs
 
-    IFilePickerFileType IInternalFilePickerPlatformService.Images =>
-#if IOS || MACOS || MACCATALYST
-        FilePickerFileType.Parse(new string[] {
-            UTType.PNG, UTType.JPEG, "jpeg",
-        });
-#else
-        FilePickerFileType.Parse(FileEx.Images);
-#endif
+    sealed class FilePickerFileTypeWrapper : IFilePickerFileType
+    {
+        public required IReadOnlyList<APS_FilePickerFileType> Values { get; init; }
 
-    IFilePickerFileType IInternalFilePickerPlatformService.Png => FilePickerFileType.Parse(new string[] {
-#if IOS || MACOS || MACCATALYST
-        UTType.PNG,
-#else
-        FileEx.PNG,
-#endif
-    });
+        public IEnumerable<string>? GetPlatformFileType(Platform platform)
+        {
+            foreach (var value in Values)
+            {
+                if (value.Patterns != null)
+                    foreach (var item in value.Patterns)
+                        yield return item;
+                if (value.MimeTypes != null)
+                    foreach (var item in value.MimeTypes)
+                        yield return item;
+                if (value.AppleUniformTypeIdentifiers != null)
+                    foreach (var item in value.AppleUniformTypeIdentifiers)
+                        yield return item;
+            }
+        }
+    }
 
-    IFilePickerFileType IInternalFilePickerPlatformService.Jpeg => FilePickerFileType.Parse(new string[] {
-#if IOS || MACOS || MACCATALYST
-        UTType.JPEG,
-        "jpeg",
-#else
-        FileEx.JPG,
-        FileEx.JPEG,
-#endif
-    });
+    IFilePickerFileType IInternalFilePickerPlatformService.Images { get; } = new FilePickerFileTypeWrapper
+    {
+        Values = new[]
+        {
+            new APS_FilePickerFileType("All Images")
+            {
+                Patterns = new[] { "*.webp", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp" },
+                AppleUniformTypeIdentifiers = new[] { "public.png", "public.jpeg", "public.jpeg-2000", "com.compuserve.gif", "com.microsoft.bmp", },
+                MimeTypes = new[] { "image/webp", "image/png", "image/jpeg", "image/gif", "image/bmp", },
+            },
+        },
+    };
 
-    IFilePickerFileType IInternalFilePickerPlatformService.Videos => FilePickerFileType.Parse(new string[] {
-#if IOS || MACOS || MACCATALYST
-        UTType.MPEG4, UTType.Video, UTType.AVIMovie, UTType.AppleProtectedMPEG4Video, "mp4", "m4v", "mpg", "mpeg", "mp2", "mov", "avi", "mkv", "flv", "gifv", "qt",
-#else
-        FileEx.Mp4,
-        FileEx.Mov,
-        FileEx.Avi,
-        FileEx.Wmv,
-        FileEx.M4v,
-        FileEx.Mpg,
-        FileEx.Mpeg,
-        FileEx.Mp2,
-        FileEx.Mkv,
-        FileEx.Flv,
-        FileEx.Gifv,
-        FileEx.Qt,
-#endif
-    });
+    IFilePickerFileType IInternalFilePickerPlatformService.Png { get; } = new FilePickerFileTypeWrapper
+    {
+        Values = new[]
+        {
+            new APS_FilePickerFileType("PNG image")
+            {
+                Patterns = new[] { "*.png", },
+                AppleUniformTypeIdentifiers = new[] { "public.png", },
+                MimeTypes = new[] { "image/png", },
+            },
+        },
+    };
 
-    IFilePickerFileType IInternalFilePickerPlatformService.Pdf => FilePickerFileType.Parse(new string[] {
-#if IOS || MACOS || MACCATALYST
-        UTType.PDF,
-#else
-        FileEx.PDF,
-#endif
-    });
+    IFilePickerFileType IInternalFilePickerPlatformService.Jpeg { get; } = new FilePickerFileTypeWrapper
+    {
+        Values = new[]
+        {
+            new APS_FilePickerFileType("JPEG image")
+            {
+                Patterns = new[] { "*.jpg", "*.jpeg", },
+                AppleUniformTypeIdentifiers = new[] { "public.jpeg", "public.jpeg-2000", },
+                MimeTypes = new[] { "image/jpeg", },
+            },
+        },
+    };
+
+    IFilePickerFileType IInternalFilePickerPlatformService.Videos => throw new NotImplementedException();
+
+    IFilePickerFileType IInternalFilePickerPlatformService.Pdf { get; } = new FilePickerFileTypeWrapper
+    {
+        Values = new[]
+        {
+            new APS_FilePickerFileType("PDF document")
+            {
+                Patterns = new[] { "*.pdf", },
+                AppleUniformTypeIdentifiers = new[] { "com.adobe.pdf", },
+                MimeTypes = new[] { "application/pdf", },
+            },
+        },
+    };
+
+    //#if IOS || MACOS || MACCATALYST
+    //    static readonly Lazy<string?[]> _UTTypes = new(() =>
+    //    {
+    //        var fields = typeof(UTType).GetProperties(BindingFlags.Public | BindingFlags.Static);
+    //        var result = fields.Where(x => x.PropertyType == typeof(string) || x.PropertyType == typeof(NSString)).Select(x => x.GetValue(null)?.ToString()).ToArray();
+    //        return result;
+    //    });
+    //#endif
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static AvaloniaFilePickerFileType Convert(string name, IEnumerable<string>? extensions)
+    static bool IsAppleUniformTypeIdentifier(string s)
     {
-        var result = new AvaloniaFilePickerFileType(name)
+        if (s == "jpeg" || s.StartsWith("public.") || s.StartsWith("com."))
+        {
+            return true;
+        }
+        //#if IOS || MACOS || MACCATALYST
+        //        if (_UTTypes.Value.Contains(s))
+        //        {
+        //            return true;
+        //        }
+        //#endif
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static APS_FilePickerFileType Convert(string name, IEnumerable<string>? extensions)
+    {
+        // https://docs.avaloniaui.net/docs/next/concepts/services/storage-provider/file-picker-options
+        var result = new APS_FilePickerFileType(name);
+        if (extensions != null)
         {
 #if IOS || MACOS || MACCATALYST
-            AppleUniformTypeIdentifiers = extensions?.ToArray(),
+            HashSet<string> appleUniformTypeIdentifiers = new();
 #else
-            Patterns = IServiceBase.FormatExtensions(extensions, trimLeadingPeriod: true).ToArray(),
+#if !WINDOWS
+            HashSet<string> mimeTypes = new();
 #endif
-        };
+            HashSet<string> patterns = new();
+#endif
+            foreach (var x in extensions)
+            {
+                if (x.Contains('/'))
+                {
+#if !WINDOWS && !(IOS || MACOS || MACCATALYST)
+                    mimeTypes.Add(x);
+#endif
+                    continue;
+                }
+                else if (IsAppleUniformTypeIdentifier(x))
+                {
+#if IOS || MACOS || MACCATALYST
+                    appleUniformTypeIdentifiers.Add(x);
+#endif
+                    continue;
+                }
+                else if (x.StartsWith('.'))
+                {
+#if !(IOS || MACOS || MACCATALYST)
+                    patterns.Add($"*{x}");
+#endif
+                    continue;
+                }
+                else if (x.StartsWith('*'))
+                {
+#if !(IOS || MACOS || MACCATALYST)
+                    patterns.Add(x);
+#endif
+                    continue;
+                }
+                else
+                {
+#if !(IOS || MACOS || MACCATALYST)
+                    patterns.Add($"*.{x}");
+#endif
+                    continue;
+                }
+            }
+#if IOS || MACOS || MACCATALYST
+            if (appleUniformTypeIdentifiers.Any())
+            {
+                result.AppleUniformTypeIdentifiers = appleUniformTypeIdentifiers.ToArray();
+            }
+#else
+#if !WINDOWS
+            if (mimeTypes.Any())
+            {
+                result.MimeTypes = mimeTypes.ToArray();
+            }
+#endif
+            if (patterns.Any())
+            {
+                result.Patterns = patterns.ToArray();
+            }
+#endif
+        }
+
         return result;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static List<AvaloniaFilePickerFileType>? Convert(IFilePickerFileType? fileTypes)
+    static IReadOnlyList<APS_FilePickerFileType>? Convert(IFilePickerFileType? fileTypes)
     {
-        if (fileTypes is FilePickerFileType.IFilePickerFileTypeWithName @interface)
+        if (fileTypes is AvaloniaFilePickerFileTypeFilter ava)
+        {
+            var items = ava.Values;
+            if (items != null)
+            {
+                var query = from m in items
+                            select new APS_FilePickerFileType(m.Name)
+                            {
+                                Patterns = m.Patterns,
+                                AppleUniformTypeIdentifiers = m.AppleUniformTypeIdentifiers,
+                                MimeTypes = m.MimeTypes,
+                            };
+                return query.ToArray();
+            }
+            return null;
+        }
+        else if (fileTypes is FilePickerFileTypeWrapper impl)
+        {
+            return impl.Values;
+        }
+        else if (fileTypes is FilePickerFileType.IFilePickerFileTypeWithName @interface)
         {
             var values = @interface.GetFileTypes();
             if (values.Any())
@@ -103,7 +230,7 @@ sealed class AvaloniaFilePickerPlatformService : BaseService, IServiceBase, IOpe
             var extensions = fileTypes?.GetPlatformFileType(DeviceInfo2.Platform());
             if (extensions.Any_Nullable())
             {
-                return new()
+                return new APS_FilePickerFileType[]
                 {
                     Convert(string.Empty, extensions),
                 };
@@ -117,8 +244,8 @@ sealed class AvaloniaFilePickerPlatformService : BaseService, IServiceBase, IOpe
     {
         foreach (var fileResult in fileResults)
         {
-            var filePath = fileResult?.Path?.ToString()?.TrimStart("file:///");
-            if (filePath != null)
+            var filePath = GetAbsoluteFilePath(fileResult);
+            if (!string.IsNullOrEmpty(filePath))
                 yield return new FileResult(filePath);
         }
     }
@@ -187,7 +314,20 @@ sealed class AvaloniaFilePickerPlatformService : BaseService, IServiceBase, IOpe
         }
 
         var fileResult = await storageProvider.SaveFilePickerAsync(options_);
-        var filePath = fileResult?.Path?.ToString()?.TrimStart("file:///");
+        var filePath = GetAbsoluteFilePath(fileResult);
         return string.IsNullOrEmpty(filePath) ? null : new(filePath);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static string? GetAbsoluteFilePath(IStorageItem? storageItem)
+    {
+        const string trim_s =
+#if WINDOWS
+            "file:///";
+#else
+            "file://";
+#endif
+        var value = storageItem?.Path?.ToString()?.TrimStart(trim_s);
+        return value;
     }
 }

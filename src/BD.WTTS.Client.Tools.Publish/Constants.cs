@@ -6,7 +6,7 @@ interface Constants
 {
     const string ProjectDir_AvaloniaApp = "BD.WTTS.Client.Avalonia.App";
     const string ProjectDir_AppHost = "BD.WTTS.Client.AppHost";
-    const string windowssdkver = "10.0.19041.0";
+    const string windowssdkver = "10.0.19041";
 
     static string DebugRuntimeConfigPath => Path.Combine(ProjectUtils.ProjPath, "src", ProjectDir_AvaloniaApp, "bin", "Debug", $"net{Environment.Version.Major}.{Environment.Version.Minor}-windows{windowssdkver}", runtimeconfigjsonfilename);
 
@@ -25,7 +25,7 @@ interface Constants
     static readonly string[] all_rids = new[] {
         "win-x64", "win-x86", "win-arm64",
         "osx-x64", "osx-arm64",
-        "linux-x64", "linux-arm64",
+        "linux-x64", "linux-arm64", "linux-loongarch64",
     };
 
     static readonly string[] ignoreDirNames = new[]
@@ -122,6 +122,7 @@ interface Constants
         Architecture.Arm64 => "arm64",
         Architecture.X64 => "x64",
         Architecture.X86 => "x86",
+        Architecture.LoongArch64 => "loongarch64",
         _ => throw new ArgumentOutOfRangeException(nameof(architecture), architecture, null),
     };
 
@@ -159,6 +160,12 @@ interface Constants
                     break;
                 case "arm64":
                     info.Architecture = Architecture.Arm64;
+                    break;
+                case "loongarch64":
+                    info.Architecture = Architecture.LoongArch64;
+                    break;
+                case "riscv64":
+                    info.Architecture = Architecture.RiscV64;
                     break;
             }
         }

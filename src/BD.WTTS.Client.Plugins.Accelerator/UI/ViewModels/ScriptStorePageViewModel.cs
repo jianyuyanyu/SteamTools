@@ -18,8 +18,6 @@ public partial class ScriptStorePageViewModel : ViewModelBase
 
         DownloadScriptItemCommand = ReactiveCommand.Create<ScriptDTO>(DownloadScriptItem);
 
-        OpenHomeScriptItemCommand = ReactiveCommand.Create<ScriptDTO>(OpenHomeScriptItem);
-
         this.WhenAnyValue(x => x.SearchText)
             .Subscribe(x =>
             {
@@ -30,11 +28,6 @@ public partial class ScriptStorePageViewModel : ViewModelBase
     public void DownloadScriptItem(ScriptDTO model)
     {
         ProxyService.Current.DownloadScript(model);
-    }
-
-    public async void OpenHomeScriptItem(ScriptDTO script)
-    {
-        await Browser2.OpenAsync(script.SourceLink);
     }
 
     async void InitializeScriptList()
@@ -50,6 +43,7 @@ public partial class ScriptStorePageViewModel : ViewModelBase
             var old = ProxyService.Current.ProxyScripts.Items.FirstOrDefault(x => x.Id == item.Id);
             if (old != null)
             {
+                item.LocalId = old.LocalId;
                 item.IsExist = true;
                 if (old.Version != item.Version)
                 {

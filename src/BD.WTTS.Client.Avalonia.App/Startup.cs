@@ -5,7 +5,17 @@ sealed partial class Program : Startup
 {
     static Program? instance;
 
-    public Program(string[]? args = null) : base(args) { }
+    public Program(string[]? args = null) : base(args)
+    {
+#if DEBUG
+        Console.WriteLine("args: ");
+        if (args != null)
+            foreach (var item in args)
+            {
+                Console.WriteLine(item);
+            }
+#endif
+    }
 
     protected override void ConfigureRequiredServices(IServiceCollection services)
     {
@@ -48,6 +58,7 @@ sealed partial class Program : Startup
         // Essentials
 #if LINUX
         services.TryAddSingleton<IApplicationVersionService, Essentials_AppVerS>();
+        services.AddSingleton<IDeviceInfoPlatformService, LinuxDeviceInfoPlatformServiceImpl>();
 #else
 #if WINDOWS
 #if AVALONIA
@@ -94,10 +105,14 @@ sealed partial class Program : Startup
             services.AddSingleton<IApplication>(s => s.GetRequiredService<App>());
 
             services.TryAddAvaloniaFilePickerPlatformService();
+#if LINUX
+            services.AddSingleton<IClipboardPlatformService, AvaloniaClipboardPlatformService>();
+#endif
 
-            #region MessageBox
+            #region WindowManager
 
             services.TryAddWindowManager();
+            services.TryAddNavigationService();
             services.TryToastService();
 
             #endregion
@@ -126,7 +141,7 @@ sealed partial class Program : Startup
 #endif
             // 通用 Http 服务
             Fusillade.NetCache.RequestCache = this;
-            services.AddSingleton<IHttpClientFactory>(new FusilladeHttpClientFactory());
+            services.AddFusilladeHttpClient();
             services.TryImageHttpClientService();
 #if STARTUP_WATCH_TRACE || DEBUG
             WatchTrace.Record("ConfigureDemandServices.HttpClientFactory");
@@ -185,7 +200,7 @@ sealed partial class Program : Startup
         WatchTrace.Record("ConfigureDemandServices.Notification");
 #endif
 
-        if (HasHosts)
+        if (HasHosts || HasIPCRoot)
         {
             // hosts 文件助手服务
             services.AddHostsFileService();
@@ -233,10 +248,34 @@ sealed partial class Program : Startup
 
     sealed class Essentials_AppVerS : IApplicationVersionService
     {
-        string IApplicationVersionService.ApplicationVersion => AssemblyInfo.Version;
+        string IApplicationVersionService.ApplicationVersion => AssemblyInfo.FileVersion;
 
         string IApplicationVersionService.AssemblyTrademark => AssemblyInfo.Trademark;
     }
+
+#if LINUX
+    sealed class LinuxDeviceInfoPlatformServiceImpl : IDeviceInfoPlatformService
+    {
+        public string Model => "";
+
+        public string Manufacturer => "";
+
+        public string Name => "";
+
+        public string VersionString => Environment.OSVersion.VersionString;
+
+        public DeviceType DeviceType => DeviceType.Physical;
+
+        public bool IsChromeOS => false;
+
+        public bool IsWinUI => false;
+
+        public bool IsUWP => false;
+
+        public DeviceIdiom Idiom => DeviceIdiom.Desktop;
+    }
+
+#endif
 
 #if AVALONIA && WINDOWS
     sealed class AvaWinDeviceInfoPlatformServiceImpl :

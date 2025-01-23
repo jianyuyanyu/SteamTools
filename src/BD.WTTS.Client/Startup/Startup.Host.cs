@@ -55,10 +55,10 @@ partial class Startup // 配置 Host
         #endregion
 
 #if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
-        if (IsMainProcess || loadModules.Any())
+        if (IsMainProcess || HasIPCRoot || loadModules.Length != 0)
         {
-            pluginResults = PluginsCore.InitPlugins(generalSettings?.CurrentValue.DisablePlugins, loadModules);
-            plugins = pluginResults?.Where(x => !x.IsDisable).Select(x => x.Data).ToHashSet();
+            var pluginResults = PluginsCore.InitPlugins(generalSettings?.CurrentValue.DisablePlugins, loadModules);
+            var plugins = pluginResults?.Where(x => !x.IsDisable).Select(x => x.Data).ToHashSet();
             HasPlugins = plugins.Any_Nullable();
             if (HasPlugins)
             {
@@ -105,13 +105,14 @@ partial class Startup // 配置 Host
                     }
                 }
                 RepetitivePlugins = repetitivePlugins;
+                this.plugins = plugins;
             }
+            this.pluginResults = pluginResults;
 #if STARTUP_WATCH_TRACE || DEBUG
             WatchTrace.Record("InitPlugins");
 #endif
         }
 #endif
-        instance = this;
 
         if (IsMainProcess)
         {
@@ -127,10 +128,51 @@ partial class Startup // 配置 Host
 
         if (HasHttpClientFactory || HasHttpProxy)
         {
+            void SetWebProxyMode(AppWebProxyMode mode)
+            {
+                switch (mode)
+                {
+                    case AppWebProxyMode.NoProxy:
+                        HttpClient.DefaultProxy = HttpNoProxy.Instance;
+                        break;
+                    case AppWebProxyMode.Custom:
+                        WebProxy webProxy;
+                        if (!string.IsNullOrEmpty(generalSettings.CurrentValue.CustomWebProxyModeHost) && generalSettings.CurrentValue.CustomWebProxyModePort != default)
+                        {
+                            webProxy = new(generalSettings.CurrentValue.CustomWebProxyModeHost, generalSettings.CurrentValue.CustomWebProxyModePort)
+                            {
+                                BypassProxyOnLocal = generalSettings.CurrentValue.CustomWebProxyModeBypassOnLocal,
+                            };
+                        }
+                        else if (!string.IsNullOrEmpty(generalSettings.CurrentValue.CustomWebProxyModeAddress))
+                        {
+                            webProxy = new(generalSettings.CurrentValue.CustomWebProxyModeAddress, generalSettings.CurrentValue.CustomWebProxyModeBypassOnLocal);
+                        }
+                        else
+                        {
+                            SetWebProxyMode(AppWebProxyMode.FollowSystem);
+                            return;
+                        }
+                        if (!string.IsNullOrEmpty(generalSettings.CurrentValue.CustomWebProxyModeCredentialUserName))
+                        {
+                            NetworkCredential credential = new(generalSettings.CurrentValue.CustomWebProxyModeCredentialUserName,
+                                generalSettings.CurrentValue.CustomWebProxyModeCredentialPassword ?? "",
+                                generalSettings.CurrentValue.CustomWebProxyModeCredentialDomain ?? "");
+                            webProxy.Credentials = credential;
+                        }
+                        HttpClient.DefaultProxy = webProxy;
+                        break;
+                    default:
+                    case AppWebProxyMode.FollowSystem:
 #if WINDOWS
-            // 在 Windows 上还原 .NET Framework 中网络请求跟随系统网络代理变化而动态切换代理行为
-            HttpClient.DefaultProxy = DynamicHttpWindowsProxy.Instance;
+                        // 在 Windows 上还原 .NET Framework 中网络请求跟随系统网络代理变化而动态切换代理行为
+                        HttpClient.DefaultProxy = DynamicHttpWindowsProxy.Instance;
 #endif
+                        break;
+                }
+            }
+            if (generalSettings != null)
+                SetWebProxyMode(generalSettings.CurrentValue.WebProxyMode);
 #if STARTUP_WATCH_TRACE || DEBUG
             WatchTrace.Record("DynamicHttpWindowsProxy");
 #endif
@@ -205,6 +247,26 @@ partial class Startup // 配置 Host
                     var app = await UIApplicationTCS.Task;
                     app.Shutdown();
                     return;
+                case key_show:
+                    try
+                    {
+                        MainThread2.BeginInvokeOnMainThread(() =>
+                        {
+                            try
+                            {
+                                IApplication.Instance.RestoreMainWindow();
+                            }
+                            catch
+                            {
+
+                            }
+                        });
+                    }
+                    catch
+                    {
+
+                    }
+                    break;
                 default:
                     var args = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                     if (args.Length >= 1)
@@ -228,12 +290,13 @@ partial class Startup // 配置 Host
                                             var proxyService = Ioc.Get_Nullable<IProxyService>();
                                             if (proxyService == null)
                                                 return;
-                                            proxyService.ProxyStatus = value switch
+                                            var status = value switch
                                             {
                                                 OnOffToggle.On => true,
                                                 OnOffToggle.Off => false,
                                                 _ => !proxyService.ProxyStatus,
                                             };
+                                            proxyService.StartOrStopProxyService(status);
                                         });
                                     }
                                     catch (Exception ex)

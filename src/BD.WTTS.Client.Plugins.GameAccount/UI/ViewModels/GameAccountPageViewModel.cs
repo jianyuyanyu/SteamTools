@@ -1,6 +1,8 @@
 using AppResources = BD.WTTS.Client.Resources.Strings;
+using SJsonSerializer = System.Text.Json.JsonSerializer;
 using Avalonia.Platform;
 using BD.WTTS.UI.Views.Pages;
+using BD.WTTS.Helpers;
 
 namespace BD.WTTS.UI.ViewModels;
 
@@ -25,7 +27,13 @@ public sealed partial class GameAccountPageViewModel
         ShareManageCommand = ReactiveCommand.Create(async () =>
         {
             var vm = new SteamFamilyShareManagePageViewModel();
-            await IWindowManager.Instance.ShowTaskDialogAsync(vm, vm.Title, pageContent: new SteamFamilyShareManagePage(), isOkButton: false);
+            var r = await IWindowManager.Instance.ShowTaskDialogAsync(vm, vm.Title, pageContent: new SteamFamilyShareManagePage(),
+                isOkButton: true, isCancelButton: true, okButtonText: Strings.Save, moreInfoText: Strings.AccountChange_ShareManageAboutTips);
+
+            if (r == true)
+            {
+                vm.SetActivity_Click();
+            }
         });
 
         LoadPlatforms();
@@ -63,7 +71,7 @@ public sealed partial class GameAccountPageViewModel
             var stream = AssetLoader.Open(PlatformsPath);
             if (stream == null) return null;
 
-            var platforms = JsonSerializer.Deserialize<PlatformAccount[]>(stream);
+            var platforms = SJsonSerializer.Deserialize<PlatformAccount[]>(stream);
             if (platforms == null) return null;
 
             foreach (var platform in platforms)
@@ -86,12 +94,18 @@ public sealed partial class GameAccountPageViewModel
     {
         GamePlatforms?[0].LoadUsers();
 
+        if (!OperatingSystem2.IsWindows())
+        {
+            AddGamePlatforms = [];
+            return;
+        }
+
         var temp = GetSupportPlatforms();
         if (temp != null)
         {
             if (GameAccountSettings.EnablePlatforms.Any_Nullable())
             {
-                AddGamePlatforms = new ObservableCollection<PlatformAccount>();
+                AddGamePlatforms = [];
 
                 foreach (var p in temp)
                 {
@@ -120,7 +134,7 @@ public sealed partial class GameAccountPageViewModel
     {
         if (!CheckPlatformStatus(SelectedPlatform)) return;
         var textModel = new TextBoxWindowViewModel();
-        var result = await IWindowManager.Instance.ShowTaskDialogAsync(textModel, AppResources.Title_AddAccount_.Format(SelectedPlatform.FullName), subHeader: AppResources.Title_PleaseInputCurrentAccountName_.Format(SelectedPlatform.FullName), isCancelButton: true);
+        var result = await IWindowManager.Instance.ShowTaskDialogAsync(textModel, AppResources.Title_AddAccount_.Format(SelectedPlatform?.FullName), subHeader: AppResources.Title_PleaseInputCurrentAccountName_.Format(SelectedPlatform.FullName), isCancelButton: true);
         if (result)
         {
             if (string.IsNullOrEmpty(textModel.Value))
@@ -128,7 +142,8 @@ public sealed partial class GameAccountPageViewModel
                 Toast.Show(ToastIcon.Warning, AppResources.Warning_PleaseInputAccountName);
                 return;
             }
-            if (SelectedPlatform.CurrnetUserAdd(textModel.Value))
+            var userAddResult = await SelectedPlatform.CurrnetUserAdd(textModel.Value);
+            if (userAddResult)
             {
                 Toast.Show(ToastIcon.Success, AppResources.Success_SavedSuccessfully_.Format(textModel.Value));
                 SelectedPlatform.LoadUsers();
@@ -141,19 +156,20 @@ public sealed partial class GameAccountPageViewModel
         if (!CheckPlatformStatus(SelectedPlatform)) return;
         var textModel = new MessageBoxWindowViewModel
         {
-            Content = AppResources.ModelContent_LoginNewUser
+            Content = AppResources.ModelContent_LoginNewUser,
         };
-        var result = await IWindowManager.Instance.ShowTaskDialogAsync(textModel, AppResources.Title_LoginAccount_.Format(SelectedPlatform.FullName), isCancelButton: true);
-        if (result)
-            SelectedPlatform?.CurrnetUserAdd(null);
+        var result = await IWindowManager.Instance.ShowTaskDialogAsync(textModel, AppResources.Title_LoginAccount_.Format(SelectedPlatform!.FullName), isCancelButton: true);
+        if (result && SelectedPlatform != null)
+            await SelectedPlatform.CurrnetUserAdd(null);
     }
 
     static bool CheckPlatformStatus(PlatformAccount? platform)
     {
         if (platform == null) return false;
-        if (!File.Exists(platform.PlatformSetting?.PlatformPath))
+        if (platform.Platform == ThirdpartyPlatform.Steam) return true;
+        if (!File.Exists(platform.ExePath))
         {
-            Toast.Show(ToastIcon.Error, $"路径没有正确选择，{platform.FullName} 平台账号切换功能无法使用");
+            Toast.Show(ToastIcon.Error, Strings.Error_UnableSwitchPlatformAccount_.Format(platform.FullName));
             return false;
         }
         return true;

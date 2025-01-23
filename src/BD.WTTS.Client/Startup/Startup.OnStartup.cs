@@ -6,15 +6,45 @@ partial class Startup // OnStartup
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void InitVisualStudioAppCenterSDK()
     {
+        VisualStudioAppCenterSDK.Init();
+    }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void ShowSettingsModifiedRestartThisSoft()
+    {
+        if (Ioc.Get_Nullable<IToastIntercept>() is StartupToastIntercept intercept
+            && !intercept.IsStartuped)
+        {
+            return;
+        }
+        Toast.Show(ToastIcon.Info, Strings.SettingsModifiedRestartThisSoft);
     }
 
     public virtual void InitSettingSubscribe()
     {
         var a = IApplication.Instance;
 
-        UISettings.Theme.Subscribe(x => a.Theme = (AppTheme)x);
+        UISettings.Theme.Subscribe(x => a.Theme = x);
         UISettings.Language.Subscribe(ResourceService.ChangeLanguage);
+
+        GeneralSettings.GPU.Subscribe(x =>
+        {
+            //if (x.HasValue) // null 为默认值时不提示
+            ShowSettingsModifiedRestartThisSoft();
+        });
+        GeneralSettings.PluginSafeMode.Subscribe(x =>
+        {
+            //if (x.HasValue) // null 为默认值时不提示
+            ShowSettingsModifiedRestartThisSoft();
+        });
+
+#if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
+        if (string.IsNullOrWhiteSpace(SteamSettings.SteamProgramPath.Value))
+        {
+            SteamSettings.SteamProgramPath.Default =
+                Ioc.Get<ISteamService>().SteamProgramPath;
+        }
+#endif
     }
 
     public virtual void OnStartup()
@@ -44,7 +74,6 @@ partial class Startup // OnStartup
                 });
             }
         }
-
 #if DEBUG
         DebugConsole.WriteInfo();
 #endif

@@ -1,7 +1,7 @@
-using AppResources = BD.WTTS.Client.Resources.Strings;
-
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System.Text.Json.Nodes;
+using AppResources = BD.WTTS.Client.Resources.Strings;
 
 namespace BD.WTTS.Services.Implementation;
 
@@ -14,7 +14,7 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
         this.platformService = platformService;
     }
 
-    private bool BasicCopyInAccount(string accId, PlatformAccount platform)
+    async ValueTask<bool> BasicCopyInAccount(string accId, PlatformAccount platform)
     {
         var allIds = JTokenHelper.ReadDict(platform.IdsJsonPath);
         var accName = allIds[accId];
@@ -40,7 +40,7 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
         {
             var uniqueId = JTokenHelper.ReadDict(platform.FullName).FirstOrDefault(x => x.Value == accName).Key;
 
-            if (!string.IsNullOrEmpty(uniqueId) && !Registry2.SetRegistryKey(platform.UniqueIdPath, uniqueId)) // Remove "REG:" and read data
+            if (!string.IsNullOrEmpty(uniqueId) && !IRegistryService.Instance.SetRegistryKey(platform.UniqueIdPath, uniqueId)) // Remove "REG:" and read data
             {
                 Toast.Show(ToastIcon.Info, AppResources.Info_AccountAlreadyLogin);
                 return false;
@@ -64,7 +64,7 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
 
                 var regValue = regJson[accFile] ?? "";
 
-                if (!Registry2.SetRegistryKey(accFile[4..], regValue)) // Remove "REG:" and read data
+                if (!IRegistryService.Instance.SetRegistryKey(accFile[4..], regValue)) // Remove "REG:" and read data
                 {
                     Toast.Show(ToastIcon.Error, AppResources.Error_WriteRegistryFailed);
                     return false;
@@ -79,12 +79,13 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
                 JToken? jToken = null;
                 JTokenHelper.TryReadJsonFile(Path.Join(localCachePath, savedFile), ref jToken);
 
-                var path = accFile.Split("::")[1];
+                var path = IOPath.ExpandEnvironmentVariables(accFile, platform.FolderPath).Split("::")[1];
                 var selector = accFile.Split("::")[2];
                 if (!JTokenHelper.ReplaceVarInJsonFile(path, selector, jToken))
                 {
-                    Toast.Show(ToastIcon.Error, AppResources.Error_ModifyJsonFileFailed);
-                    return false;
+                    //Toast.Show(ToastIcon.Error, AppResources.Error_ModifyJsonFileFailed);
+                    Log.Error(nameof(BasicPlatformSwitcher), $"Failed to modify JSON file: {path}");
+                    //return false;
                 }
                 continue;
             }
@@ -96,12 +97,13 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
         return true;
     }
 
-    public void SwapToAccount(IAccount? account, PlatformAccount platform)
+    public async ValueTask<bool> SwapToAccount(IAccount? account, PlatformAccount platform)
     {
         //LoadAccountIds();
 
-        if (!KillPlatformProcess(platform))
-            return;
+        var killResult = await KillPlatformProcess(platform);
+        if (!killResult)
+            return false;
 
         // Add currently logged in account if there is a way of checking unique ID.
         // If saved, and has unique key: Update
@@ -118,25 +120,25 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
                     {
                         RunPlatformProcess(platform, true);
                         Toast.Show(ToastIcon.Info, AppResources.Info_AlreadyTheCurrentAccount);
-                        return;
+                        return false;
                     }
-                    CurrnetUserAdd(platform.Accounts.First(acc => acc.AccountId == uniqueId).AccountName ?? "Unknown", platform);
+                    await CurrnetUserAdd(platform.Accounts.First(acc => acc.AccountId == uniqueId).AccountName ?? "Unknown", platform);
                 }
             }
         }
 
         // Clear current login
-        ClearCurrentLoginUser(platform);
+        await ClearCurrentLoginUser(platform);
 
         // Copy saved files in
         if (!string.IsNullOrEmpty(account?.AccountId))
         {
-            if (!BasicCopyInAccount(account.AccountId, platform)) return;
+            if (!await BasicCopyInAccount(account.AccountId, platform)) return false;
             //Globals.AddTrayUser(platform.SafeName, $"+{platform.PrimaryId}:" + accId, accName, BasicSettings.TrayAccNumber); // Add to Tray list, using first Identifier
         }
 
         //if (BasicSettings.AutoStart)
-        RunPlatformProcess(platform, true);
+        RunPlatformProcess(platform, false);
 
         //if (accName != "" && BasicSettings.AutoStart && AppSettings.MinimizeOnSwitch) _ = AppData.InvokeVoidAsync("hideWindow");
 
@@ -154,13 +156,24 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
         //{
         //    //
         //}
+        return true;
     }
 
-    public bool ClearCurrentLoginUser(PlatformAccount platform)
+    public async ValueTask<bool> ClearCurrentLoginUser(PlatformAccount platform)
+    {
+        var result = await ClearCurrentLoginUserCore(platform);
+        return result;
+    }
+
+    async ValueTask<bool> ClearCurrentLoginUserCore(PlatformAccount platform)
     {
         // Foreach file/folder/reg in Platform.PathListToClear
-        if (platform.ClearPaths.Any_Nullable(accFile => !DeleteFileOrFolder(accFile, platform)))
-            return false;
+
+        foreach (var accFile in platform.ClearPaths!)
+        {
+            if (!await DeleteFileOrFolder(accFile, platform))
+                return false;
+        }
 
         var uniqueIdFile = IOPath.ExpandEnvironmentVariables(platform.UniqueIdPath, platform.FolderPath);
 
@@ -168,7 +181,7 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
         {
             var path = uniqueIdFile.Split("::")[0];
             var selector = uniqueIdFile.Split("::")[1];
-            JTokenHelper.ReplaceVarInJsonFile(path, selector, "");
+            JTokenHelper.ReplaceVarInJsonFile(path, selector, string.Empty);
         }
 
         if (platform.UniqueIdType != UniqueIdType.CREATE_ID_FILE) return true;
@@ -179,7 +192,7 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
         return true;
     }
 
-    private bool DeleteFileOrFolder(string accFile, PlatformAccount platform)
+    async ValueTask<bool> DeleteFileOrFolder(string accFile, PlatformAccount platform)
     {
         // The "file" is a registry key
 #if WINDOWS
@@ -188,11 +201,11 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
             // If set to clear LoginCache for account before adding (Enabled by default):
             if (platform.IsRegDeleteOnClear)
             {
-                if (Registry2.DeleteRegistryKey(accFile[4..])) return true;
+                if (IRegistryService.Instance.DeleteRegistryKey(accFile[4..])) return true;
             }
             else
             {
-                if (Registry2.SetRegistryKey(accFile[4..])) return true;
+                if (IRegistryService.Instance.SetRegistryKey(accFile[4..])) return true;
             }
             Toast.Show(ToastIcon.Error, AppResources.Error_WriteRegistryFailed);
             return false;
@@ -204,9 +217,10 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
         {
             if (accFile.StartsWith("JSON_SELECT"))
             {
-                var path = accFile.Split("::")[1];
+                var path = IOPath.ExpandEnvironmentVariables(accFile.Split("::")[1]);
                 var selector = accFile.Split("::")[2];
                 JTokenHelper.ReplaceVarInJsonFile(path, selector, "");
+                return true;
             }
         }
 
@@ -253,34 +267,137 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
         return true;
     }
 
-    public bool KillPlatformProcess(PlatformAccount platform)
+    bool KillPlatformProcessCore(PlatformAccount platform)
     {
-        try
+        var processNames = GetProcessNames(platform);
+        if (processNames != null)
         {
-            if (platform.ExesToEnd.Any_Nullable())
+            var processes = processNames.Select(static x =>
             {
-                foreach (var procName in platform.ExesToEnd)
+                try
                 {
-                    var process = Process.GetProcessesByName(procName.Split(".exe")[0]);
-                    foreach (var item in process)
+                    var process = Process.GetProcessesByName(x);
+                    return process;
+                }
+                catch
+                {
+                    return Array.Empty<Process>();
+                }
+            }).SelectMany(static x => x).ToArray();
+
+            static ApplicationException? KillProcess(Process? process)
+            {
+                if (process == null)
+                    return default;
+                try
+                {
+                    if (!process.HasExited)
                     {
-                        if (!item.HasExited)
+                        process.Kill();
+                        process.WaitForExit();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    return new ApplicationException(
+                        $"KillProcesses fail, name: {process?.ProcessName}", ex);
+                }
+                return default;
+            }
+
+            try
+            {
+                if (processes.Any())
+                {
+                    var tasks = processes.Select(x =>
+                    {
+                        return Task.Run(() =>
                         {
-                            item.Kill();
-                        }
+                            return KillProcess(x);
+                        });
+                    }).ToArray();
+                    Task.WaitAll(tasks);
+
+                    var innerExceptions = tasks.Select(x => x.Result!)
+                        .Where(x => x != null).ToArray();
+                    if (innerExceptions.Any())
+                    {
+                        throw new AggregateException(
+                            "KillProcess fail", innerExceptions);
                     }
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            Log.Error(nameof(BasicPlatformSwitcher), ex, nameof(KillPlatformProcess));
-            Toast.Show(ToastIcon.Error, AppResources.Error_EndProcessFailed_.Format(platform.FullName));
-            return false;
+            catch (Exception ex)
+            {
+                Log.Error(nameof(BasicPlatformSwitcher), ex, nameof(KillPlatformProcess));
+                Toast.Show(ToastIcon.Error,
+                    AppResources.Error_EndProcessFailed_.Format(platform.FullName));
+                return false;
+            }
         }
 
         return true;
     }
+
+    static string[]? GetProcessNames(PlatformAccount platform)
+    {
+        IEnumerable<string>? processNames_ = platform.ExesToEnd;
+        if (processNames_ != null)
+        {
+            processNames_ = processNames_.Select(x =>
+            {
+                try
+                {
+                    return x.Split(FileEx.EXE, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()!;
+                }
+                catch
+                {
+
+                }
+                return default!;
+            }).Where(x => !string.IsNullOrWhiteSpace(x));
+
+            var processNames = processNames_.ToArray();
+            return processNames;
+        }
+
+        return null;
+    }
+
+#if WINDOWS
+    public async ValueTask<bool> KillPlatformProcess(PlatformAccount platform)
+    {
+        if (WindowsPlatformServiceImpl.IsPrivilegedProcess)
+        {
+            return KillPlatformProcessCore(platform);
+        }
+        else
+        {
+            try
+            {
+                var processNames = GetProcessNames(platform);
+                if (processNames.Any_Nullable())
+                {
+                    var platformService = await IPlatformService.IPCRoot.Instance;
+                    var r = platformService.KillProcesses(processNames);
+                    return r ?? false;
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Error(nameof(BasicPlatformSwitcher), e, "KillPlatformProcess fail.");
+                return false;
+            }
+        }
+        return true;
+    }
+#else
+    public ValueTask<bool> KillPlatformProcess(PlatformAccount platform)
+    {
+        var result = KillPlatformProcessCore(platform);
+        return ValueTask.FromResult(result);
+    }
+#endif
 
     public bool RunPlatformProcess(PlatformAccount platform, bool isAdmin)
     {
@@ -298,9 +415,9 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
         return true;
     }
 
-    public void NewUserLogin(PlatformAccount platform)
+    public async ValueTask NewUserLogin(PlatformAccount platform)
     {
-        SwapToAccount(null, platform);
+        await SwapToAccount(null, platform);
     }
 
     public string GetCurrentAccountId(PlatformAccount platform)
@@ -317,14 +434,17 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
         return "";
     }
 
-    public bool CurrnetUserAdd(string name, PlatformAccount platform)
+    public async ValueTask<bool> CurrnetUserAdd(string name, PlatformAccount platform)
     {
         if (string.IsNullOrEmpty(platform.UniqueIdPath))
             return false;
 
         if (platform.IsExitBeforeInteract)
-            if (!KillPlatformProcess(platform))
+        {
+            var killResult = await KillPlatformProcess(platform);
+            if (!killResult)
                 return false;
+        }
 
         var localCachePath = Path.Combine(platform.PlatformLoginCache, name);
 
@@ -343,17 +463,11 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
 
         if (!platform.LoginFiles.Any_Nullable())
         {
-            Toast.Show("No data in platform: " + platform.FullName);
+            Toast.Show(ToastIcon.Warning, "No data in platform: " + platform.FullName);
             return false;
         }
 
         var uniqueId = GetUniqueId(platform);
-
-        if (string.IsNullOrEmpty(uniqueId))
-        {
-            Toast.Show("No data in platform: " + platform.FullName);
-            return false;
-        }
 
         if (uniqueId == "" && platform.UniqueIdType is UniqueIdType.CREATE_ID_FILE)
         {
@@ -364,10 +478,16 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
                 File.WriteAllText(uniqueIdFile, uniqueId);
         }
 
+        if (string.IsNullOrEmpty(uniqueId))
+        {
+            Toast.Show(ToastIcon.Warning, "No data in platform: " + platform.FullName);
+            return false;
+        }
+
         // Handle special args in username
         //var hadSpecialProperties = ProcessSpecialAccName(specialString, accName, uniqueId);
 
-        var regJson = platform.UniqueIdPath.StartsWith("REG:") ? JTokenHelper.ReadRegJson(platform.RegJsonPath(name)) : new Dictionary<string, string>();
+        var regJson = platform.UniqueIdPath.StartsWith("REG:") ? JTokenHelper.ReadDict(platform.RegJsonPath(name)) : new Dictionary<string, string>();
 
         foreach (var (accFile, savedFile) in platform.LoginFiles)
         {
@@ -388,7 +508,7 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
 
             if (accFile.StartsWith("JSON"))
             {
-                var path = accFile.Split("::")[1];
+                var path = IOPath.ExpandEnvironmentVariables(accFile, platform.FolderPath).Split("::")[1];
                 var selector = accFile.Split("::")[2];
 
                 JToken? js = null;
@@ -396,7 +516,47 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
                 if (js == null)
                     continue;
 
-                var originalValue = js.SelectToken(selector);
+                JToken? originalValue = null;
+
+                try
+                {
+                    originalValue = js.SelectToken(selector);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(nameof(CurrnetUserAdd), ex, $"Failed to select token: {selector}");
+                }
+
+                if (originalValue == null)
+                {
+                    // 尝试以数组形式再次寻找
+                    try
+                    {
+                        var tokens = js.SelectTokens(selector);
+
+                        //暂时将就写一个临时的战网处理方法解决问题
+                        if (platform.Platform == ThirdpartyPlatform.BattleNet)
+                        {
+                            originalValue = tokens.FirstOrDefault(x =>
+                            {
+                                var temp = x.Parent?.Parent?.Parent?.Parent?["Path"]?.Value<string>();
+                                var temp2 = platform.FolderPath;
+                                if (temp != null && temp2 != null)
+                                    return string.Equals(
+                                        temp.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                                        temp2.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                                        StringComparison.OrdinalIgnoreCase);
+                                return false;
+                            });
+                        }
+                        originalValue ??= tokens.FirstOrDefault();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(nameof(CurrnetUserAdd), ex, $"Failed to select tokens: {selector}");
+                    }
+                }
+
                 if (originalValue == null)
                     continue;
 
@@ -420,6 +580,7 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
                 var originalValueString = (string)originalValue;
                 originalValueString = IOPath.CleanPathIlegalCharacter(firstResult ? originalValueString.Split(delimiter).First() : originalValueString.Split(delimiter).Last());
 
+                IOPath.DirCreateByNotExists(localCachePath);
                 JTokenHelper.SaveJsonFile(Path.Combine(localCachePath, savedFile), originalValueString);
                 continue;
             }
@@ -427,14 +588,16 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
             // FILE OR FOLDER
             if (PathHelper.HandleFileOrFolder(accFile, savedFile, localCachePath, false, platform.FolderPath)) continue;
 
-            // Could not find file/folder
-            Toast.Show(ToastIcon.Error, AppResources.Error_CannotFindAccountFile_.Format(accFile));
-
-            return false;
-
-            // TODO: Run some action that can be specified in the Platforms.json file
-            // Add for the start, and end of this function -- To allow 'plugins'?
-            // Use reflection?
+            if (platform.AllFilesRequired)
+            {
+                // Could not find file/folder
+                Toast.Show(ToastIcon.Error, AppResources.Error_CannotFindAccountFile_.Format(accFile));
+                return false;
+            }
+            else
+            {
+                Log.Warn(nameof(CurrnetUserAdd), $"{accFile} Could not find file/folder");
+            }
         }
 
         JTokenHelper.SaveRegJson(regJson, platform.RegJsonPath(name));
@@ -538,7 +701,7 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
         return uniqueId;
     }
 
-    public Task<IEnumerable<IAccount>?> GetUsers(PlatformAccount platform)
+    public Task<IEnumerable<IAccount>?> GetUsers(PlatformAccount platform, Action? refreshUsers = null)
     {
         List<BasicAccount>? accounts = null;
         var localCachePath = platform.PlatformLoginCache;
@@ -548,6 +711,7 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
 
         var idsFile = Path.Combine(localCachePath, "ids.json");
 
+        var accountRemarks = Ioc.Get_Nullable<IPartialGameAccountSettings>()?.AccountRemarks;
         var accList = File.Exists(idsFile) ? JTokenHelper.ReadDict(idsFile).ToList() : null;
 
         if (accList.Any_Nullable())
@@ -559,13 +723,15 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
 
             foreach (var item in accList)
             {
-                var account = new BasicAccount
+                var account = new BasicAccount(item.Key)
                 {
+                    //AccountId = item.Key,
+                    AccountName = item.Value,
                     PlatformName = platform.FullName,
                     Platform = platform.Platform,
-                    AccountId = item.Key,
-                    AccountName = item.Value
                 };
+                if (accountRemarks?.TryGetValue($"{platform.FullName}-{account.AccountId}", out var remark) == true && !string.IsNullOrEmpty(remark))
+                    account.AliasName = remark;
                 if (!string.IsNullOrEmpty(account.AccountName))
                 {
                     // Handle account image
@@ -588,7 +754,7 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
         return false;
     }
 
-    public async Task DeleteAccountInfo(IAccount account, PlatformAccount platform)
+    public async Task<bool> DeleteAccountInfo(IAccount account, PlatformAccount platform)
     {
         var result = await MessageBox.ShowAsync(Strings.UserChange_DeleteUserTip, button: MessageBox.Button.OKCancel);
         if (result == MessageBox.Result.OK)
@@ -604,7 +770,7 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
                 //    _ = allIds.Remove(accId);
                 //}
                 //else
-                _ = allIds.Remove(allIds.Single(x => x.Value == account.AccountId).Key);
+                _ = allIds.Remove(allIds.Single(x => x.Key == account.AccountId).Key);
                 File.WriteAllText(platform.IdsJsonPath, JsonConvert.SerializeObject(allIds));
             }
 
@@ -618,6 +784,8 @@ public sealed class BasicPlatformSwitcher : IPlatformSwitcher
             }
 
             platform.Accounts?.Remove(account);
+            return true;
         }
+        return false;
     }
 }

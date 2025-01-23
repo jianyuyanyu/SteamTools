@@ -1,27 +1,39 @@
 #if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
 using ASFStrings = ArchiSteamFarm.Localization.Strings;
 using AppResources = BD.WTTS.Client.Resources.Strings;
-using ASFNLogManager = ArchiSteamFarm.LogManager;
+using ArchiSteamFarm.IPC;
+using Newtonsoft.Json.Linq;
 
 // ReSharper disable once CheckNamespace
 namespace BD.WTTS.Services.Implementation;
 
-public partial class ArchiSteamFarmServiceImpl : ReactiveObject, IArchiSteamFarmService, IIoc
+public partial class ArchiSteamFarmServiceImpl : ReactiveObject, IArchiSteamFarmService
 {
     const string TAG = "ArchiSteamFarmS";
 
+    private readonly AsyncLock @lock = new AsyncLock();
+
+    private bool isFirstStart = true;
+
+    private bool _IsReadPasswordLine;
+
+    private HttpClient _httpClient = new();
+
+    private bool _IsWaitUserInput;
+
+    protected readonly IArchiSteamFarmWebApiService webApiService = IArchiSteamFarmWebApiService.Instance;
+
     public ArchiSteamFarmServiceImpl()
     {
-        ArchiSteamFarmLibrary.Init(this, IOPath.AppDataDirectory, IApplication.LogDirPathASF);
     }
+
+    public static int? ASFProcessId { get; private set; }
+
+    public Process? ASFProcess { get; set; }
 
     public event Action<string>? OnConsoleWirteLine;
 
     public TaskCompletionSource<string>? ReadLineTask { get; set; }
-
-    private readonly AsyncLock @lock = new AsyncLock();
-
-    bool _IsReadPasswordLine;
 
     public bool IsReadPasswordLine
     {
@@ -29,108 +41,280 @@ public partial class ArchiSteamFarmServiceImpl : ReactiveObject, IArchiSteamFarm
         set => this.RaiseAndSetIfChanged(ref _IsReadPasswordLine, value);
     }
 
-    public DateTimeOffset? StartTime { get; set; }
-
     public Version CurrentVersion => SharedInfo.Version;
 
-    private bool isFirstStart = true;
-
-    T IIoc.GetRequiredService<T>() where T : class => Ioc.Get<T>();
-
-    T? IIoc.GetService<T>() where T : class => Ioc.Get_Nullable<T>();
-
-    static void InitCoreLoggers()
+    public async Task ShellMessageInput(string data)
     {
-        IApplication.LogDirPathASF = ASFPathHelper.GetLogDirectory(IApplication.LogDirPathASF);
-        if (ASFNLogManager.Configuration != null) return;
-        LoggingConfiguration config = new();
-        FileTarget fileTarget = new("File")
+        if (ASFProcess is not null)
         {
-            ArchiveFileName = ASFPathHelper.GetNLogArchiveFileName(IApplication.LogDirPathASF),
-            ArchiveNumbering = ArchiveNumberingMode.Rolling,
-            ArchiveOldFileOnStartup = true,
-            CleanupFileName = false,
-            ConcurrentWrites = false,
-            DeleteOldFileOnStartup = true,
-            FileName = ASFPathHelper.GetNLogFileName(IApplication.LogDirPathASF),
-            Layout = ASFPathHelper.NLogGeneralLayout,
-            ArchiveAboveSize = 10485760,
-            MaxArchiveFiles = 10,
-            MaxArchiveDays = 7,
-        };
-        //IApplication.InitializeTarget(config, fileTarget, NLogLevel.Debug);
-        var historyTarget = new HistoryTarget("History")
-        {
-            Layout = ASFPathHelper.NLogGeneralLayout,
-            MaxCount = 20,
-        };
-        //IApplication.InitializeTarget(config, historyTarget, NLogLevel.Debug);
-        ASFNLogManager.Configuration = config;
+            if (_IsWaitUserInput) // 等待用户输入
+            {
+                var sw = ASFProcess.StandardInput;
+                sw.WriteLine(data);
+            }
+            else // ASF 命令
+            {
+                var result = await ExecuteCommandAsync(data);
+                if (!string.IsNullOrEmpty(result))
+                    OnConsoleWirteLine?.Invoke(Environment.NewLine + result);
+            }
+        }
     }
 
-    public async Task<bool> StartAsync(string[]? args = null)
+    public async Task<(bool IsSuccess, string IPCUrl)> StartAsync(string[]? args = null)
     {
         try
         {
-            StartTime = DateTimeOffset.Now;
-
             if (isFirstStart)
             {
-                InitCoreLoggers();
-
-                InitHistoryLogger();
-
-                ArchiSteamFarm.NLog.Logging.GetUserInputFunc = async (bool isPassword) =>
-                {
-                    using (await @lock.LockAsync())
-                    {
-                        ReadLineTask = new(TaskCreationOptions.AttachedToParent);
-                        IsReadPasswordLine = isPassword;
-#if NET6_0_OR_GREATER
-                        var result = await ReadLineTask.Task.WaitAsync(TimeSpan.FromSeconds(60));
-#else
-                            var result = await ReadLineTask.Task;
-#endif
-                        if (IsReadPasswordLine)
-                            IsReadPasswordLine = false;
-                        ReadLineTask = null;
-                        return result;
-                    }
-                };
-
                 await ReadEncryptionKeyAsync();
-
-                await Program.Init(args).ConfigureAwait(false);
                 isFirstStart = false;
             }
+
+            (var isSuccess, var ipcUrl) = await StartProcessAsync();
+            if (!isSuccess && !isFirstStart)
+                throw new ArgumentException();
             else
-            {
-                if (!await Program.InitASF().ConfigureAwait(false))
-                {
-                    await StopAsync().ConfigureAwait(false);
-                    return false;
-                }
-            }
-            return true;
+                return (ASF.IsReady = isSuccess, ipcUrl);
         }
         catch (Exception e)
         {
             e.LogAndShowT(TAG, msg: "ASF Start Fail.");
             await StopAsync().ConfigureAwait(false);
-            return false;
+            return (false, string.Empty);
         }
     }
 
-    public async Task StopAsync()
+    #region StartProcess
+
+    private async Task<(bool IsSuccess, string Message)> StartProcessAsync()
     {
-        StartTime = null;
-        ReadLineTask?.TrySetResult("");
-        await Program.InitShutdownSequence();
+        var isStartSuccess = false;
+        var ipcUrl = string.Empty;
+
+        if (ASFProcess != null || string.IsNullOrEmpty(SharedInfo.ASFExecuteFilePath))
+        {
+            Toast.Show(ToastIcon.Error, BDStrings.ASF_SelectASFExePath);
+            return (isStartSuccess, ipcUrl);
+        }
+
+        if (ASFSettings.CheckArchiSteamFarmExe && !await CheckFileConsistence()) // 检查文件是否被篡改
+        {
+            Toast.Show(ToastIcon.Error, BDStrings.ASF_ExecuteFileUnsafe);
+            return (isStartSuccess, ipcUrl);
+        }
+
+        ipcUrl = GetIPCUrl();
+        webApiService.SetIPCUrl(ipcUrl); // 设置 IPC 接口地址
+
+        KillASFProcess(); // 杀死未关闭的 ASF 进程
+
+        ASFProcess = StartAsync(SharedInfo.ASFExecuteFilePath);
+        ASFProcessId = ASFProcess?.Id;
+
+        ASFService.Current.ConsoleLogText = string.Empty;
+        Task2.InBackground(ReadOutPutData, true);
+        AppDomain.CurrentDomain.ProcessExit += ExitHandler;
+        AppDomain.CurrentDomain.UnhandledException += ExitHandler;
+
+        ASFProcess!.ErrorDataReceived += new DataReceivedEventHandler(ExitHandler);
+        ASFProcess.BeginErrorReadLine();
+
+        using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        while (
+            !(isStartSuccess = SocketHelper.IsUsePort(CurrentIPCPortValue)) &&
+            !cancellationTokenSource.IsCancellationRequested)
+        {
+            await Task.Delay(1000);
+            continue;
+        }
+        return (isStartSuccess, ipcUrl);
+
+        Process? StartAsync(string fileName)
+        {
+            var options = new ProcessStartInfo(fileName);
+            options.CreateNoWindow = true;
+            options.UseShellExecute = false;
+            options.RedirectStandardOutput = true;
+            options.RedirectStandardInput = true;
+            options.RedirectStandardError = true;
+            options.ArgumentList.Add("--PROCESS-REQUIRED");
+            if (!string.IsNullOrEmpty(EncryptionKey))
+            {
+                options.ArgumentList.Add("--CRYPTKEY");
+                options.ArgumentList.Add(EncryptionKey);
+            }
+            return Process.Start(options);
+        }
     }
 
-    async Task IArchiSteamFarmHelperService.Restart()
+    private void KillASFProcess()
     {
-        Toast.Show(AppResources.ASF_Restarting, ToastLength.Short);
+        var processName = Path.GetFileNameWithoutExtension(SharedInfo.ASFExecuteFilePath);
+        var process_list = Process.GetProcessesByName(processName);
+        if (process_list.Any())
+            process_list.ForEach(x =>
+            {
+                if (Path.GetFullPath(x.MainModule?.FileName ?? string.Empty) == Path.GetFullPath(SharedInfo.ASFExecuteFilePath))
+                {
+                    x.Kill(); x.Dispose();
+                }
+            });
+    }
+
+    private async Task<bool> CheckFileConsistence()
+    {
+        var isConsistence = false;
+        if (File.Exists(SharedInfo.ASFExecuteFilePath))
+        {
+            try
+            {
+                var versionInfo = FileVersionInfo.GetVersionInfo(SharedInfo.ASFExecuteFilePath);
+
+                var fileName = "ASF-win-x64.zip";
+                var downloadUrl = $"https://github.com/JustArchiNET/ArchiSteamFarm/releases/download/{versionInfo.FileVersion}/{fileName}";
+                var savePath = Path.Combine(Plugin.Instance.AppDataDirectory, $"ASF-{versionInfo.FileVersion}", fileName);
+                var saveDir = Path.GetDirectoryName(savePath)!;
+
+                var destination_asfPath = Path.Combine(saveDir, Path.GetFileName(SharedInfo.ASFExecuteFilePath));
+                if (!File.Exists(destination_asfPath))
+                {
+                    Directory.CreateDirectory(saveDir);
+                    if (await DownloadASFRelease(downloadUrl, savePath))
+                        ZipFile.ExtractToDirectory(savePath, saveDir);
+                    else
+                        Toast.Show(ToastIcon.Error, "比对文件下载失败");
+                }
+
+                if (CalculateFileHash(SharedInfo.ASFExecuteFilePath) == CalculateFileHash(destination_asfPath))
+                    isConsistence = true;
+            }
+            catch (Exception)
+            {
+            }
+
+        }
+        return isConsistence;
+
+        string CalculateFileHash(string filePath)
+        {
+            using (var hasher = SHA256.Create())
+            using (var stream = new BufferedStream(File.OpenRead(filePath), 1200000))
+            {
+                byte[] hashBytes = hasher.ComputeHash(stream);
+                return BitConverter.ToString(hashBytes).Replace("-", "");
+            }
+        }
+
+        async Task<bool> DownloadASFRelease(string downloadUrl, string savePath)
+        {
+            try
+            {
+                HttpResponseMessage response = await _httpClient.GetAsync(downloadUrl);
+
+                // Ensure a successful response before proceeding
+                response.EnsureSuccessStatusCode();
+
+                using (var fileStream = new FileStream(savePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    await response.Content.CopyToAsync(fileStream);
+                }
+            }
+            catch (Exception ex)
+            {
+                return false;
+            }
+            return true;
+        }
+    }
+
+    private void ExitHandler(object? sender, EventArgs eventArgs)
+    {
+        StopAsync().GetAwaiter().GetResult();
+        ASFService.Current.SteamBotsSourceList.Clear();
+    }
+
+    private async void ReadOutPutData()
+    {
+        using (StreamReader sr = ASFProcess!.StandardOutput)
+        {
+            int readResult;
+            char ch;
+            StringBuilder sb = new();
+            var len = string.Empty;
+
+            while (ASFProcess is not null)
+            {
+                var readAsync = Task.Run(sr.Read);
+
+                await Task.WhenAny(readAsync, Task.Delay(TimeSpan.FromSeconds(3)));
+
+                _IsWaitUserInput = false;
+                if (!readAsync.IsCompleted)
+                {
+                    if (sb.Length > 0)
+                    {
+                        len = sb.ToString();
+                        OnConsoleWirteLine?.Invoke(len);
+                        sb.Clear();
+                        _IsWaitUserInput = true;
+                    }
+                }
+
+                if (!readAsync.IsCompletedSuccessfully && ASF.IsReady)
+                    ASFService.Current.RefreshBots();
+
+                if ((readResult = await readAsync) != -1)
+                {
+                    ch = (char)readResult;
+                    sb.Append(ch);
+
+                    // Note the following common line feed chars:
+                    // \n - UNIX   \r\n - DOS   \r - Mac
+                    if (ch == '\r' || ch == '\n')
+                    {
+                        readResult = sr.Read();
+                        if (readResult != -1)
+                        {
+                            ch = (char)readResult;
+                            if (ch == '\n')
+                            {
+                                sb.Append(ch);
+                                len = sb.ToString();
+                                OnConsoleWirteLine?.Invoke(len);
+                                sb.Clear();
+                            }
+                            else
+                            {
+                                len = sb.ToString();
+                                OnConsoleWirteLine?.Invoke(len);
+                                sb.Clear();
+                                sb.Append(ch);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #endregion
+
+    public async Task StopAsync()
+    {
+        ASF.IsReady &= false;
+        ReadLineTask?.TrySetResult("");
+        if (ASFProcess != null)
+        {
+            await Task.WhenAny(webApiService.ASF.Exit(), Task.Delay(TimeSpan.FromSeconds(3)));
+            ASFProcess.Kill();
+            ASFProcess.Dispose();
+            ASFProcess = null;
+        }
+    }
+
+    public async Task RestartAsync()
+    {
+        Toast.Show(ToastIcon.Info, AppResources.ASF_Restarting, ToastLength.Short);
 
         var s = ASFService.Current;
         if (s.IsASFRuning)
@@ -139,51 +323,28 @@ public partial class ArchiSteamFarmServiceImpl : ReactiveObject, IArchiSteamFarm
         }
         await s.InitASFCoreAsync(false);
 
-        Toast.Show(AppResources.ASF_Restarted, ToastLength.Short);
+        Toast.Show(ToastIcon.Success, AppResources.ASF_Restarted, ToastLength.Short);
     }
 
-    LogLevel IArchiSteamFarmHelperService.MinimumLevel => IApplication.LoggerMinLevel;
-
-    private void InitHistoryLogger()
-    {
-        ArchiSteamFarm.NLog.Logging.InitHistoryLogger();
-
-        HistoryTarget? historyTarget = ArchiSteamFarm.LogManager.Configuration.AllTargets.OfType<HistoryTarget>().FirstOrDefault();
-
-        if (historyTarget != null)
-            historyTarget.NewHistoryEntry += (object? sender, HistoryTarget.NewHistoryEntryArgs newHistoryEntryArgs) =>
-            {
-                OnConsoleWirteLine?.Invoke(newHistoryEntryArgs.Message);
-            };
-    }
+    LogLevel MinimumLevel => IApplication.LoggerMinLevel;
 
     public async Task<string?> ExecuteCommandAsync(string command)
     {
-        Bot? targetBot = Bot.Bots?.OrderBy(bot => bot.Key, Bot.BotsComparer).Select(bot => bot.Value).FirstOrDefault();
+        (var isSuccess, _) = VerifyApiReady<GenericResponse>();
+        if (!isSuccess) return string.Empty;
 
-        ASF.ArchiLogger.LogGenericInfo(command);
-
-        if (targetBot == null)
-        {
-            ASF.ArchiLogger.LogGenericWarning(ASFStrings.ErrorNoBotsDefined);
-            return null;
-        }
-
-        ASF.ArchiLogger.LogGenericInfo(ASFStrings.Executing);
-
-        ulong steamOwnerID = ASF.GlobalConfig?.SteamOwnerID ?? GlobalConfig.DefaultSteamOwnerID;
-
-        var access = targetBot.GetAccess(steamOwnerID);
-        string? response = await targetBot.Commands.Response(access, command, steamOwnerID);
-
-        if (!string.IsNullOrEmpty(response))
-            ASF.ArchiLogger.LogGenericInfo(response);
-        return response;
+        var request = new CommandRequest(command);
+        var r = await webApiService.Command.CommandPost(request);
+        return r.IsSuccess ? r.Content : null;
     }
 
-    public IReadOnlyDictionary<string, Bot>? GetReadOnlyAllBots()
+    public async Task<IReadOnlyDictionary<string, Bot>?> GetReadOnlyAllBots()
     {
-        var bots = Bot.Bots;
+        (var isSuccess, var rsp) = VerifyApiReady<IReadOnlyDictionary<string, Bot>?>();
+        if (!isSuccess) return rsp.Content;
+
+        var r = await webApiService.Bot.BotGet("asf");
+        var bots = r.Content;
         //if (bots is not null)
         //    foreach (var bot in bots.Values)
         //    {
@@ -192,106 +353,102 @@ public partial class ArchiSteamFarmServiceImpl : ReactiveObject, IArchiSteamFarm
         return bots;
     }
 
-    public async void SaveBot(Bot bot)
+    public async Task<bool> SaveBot(string botName, BotConfig botConfig)
     {
-        //var bot = Bot.GetBot(botName);
-        string filePath = Bot.GetFilePath(bot.BotName, Bot.EFileType.Config);
-        bool result = await BotConfig.Write(filePath, bot.BotConfig).ConfigureAwait(false);
+        (var isSuccess, _) = VerifyApiReady<GenericResponse>();
+        if (!isSuccess) return isSuccess;
+
+        var request = new BotRequest() { BotConfig = botConfig };
+        var r = await webApiService.Bot.BotPost(botName, request);
+        return r.IsSuccess;
     }
 
-    public GlobalConfig? GetGlobalConfig()
+    public async Task<GlobalConfig?> GetGlobalConfig()
     {
-        return ASF.GlobalConfig;
+        (var isSuccess, _) = VerifyApiReady<GenericResponse>();
+        if (!isSuccess) return null;
+
+        var r = await webApiService.ASF.Get();
+        return r.IsSuccess ? r.Content.GlobalConfig : null;
     }
 
-    public async void SaveGlobalConfig(GlobalConfig config)
+    public async Task<bool> SaveGlobalConfig(GlobalConfig config)
     {
-        string filePath = ASF.GetFilePath(ASF.EFileType.Config);
-        bool result = await GlobalConfig.Write(filePath, config).ConfigureAwait(false);
-        if (result)
-        {
-            Toast.Show("SaveGlobalConfig  " + result);
-        }
+        (var isSuccess, _) = VerifyApiReady<GenericResponse>();
+        if (!isSuccess) return isSuccess;
+
+        var request = new ASFRequest() { GlobalConfig = config };
+        var r = await webApiService.ASF.Post(request);
+        if (r.IsSuccess)
+            Toast.Show(ToastIcon.Info, "SaveGlobalConfig  " + r.IsSuccess);
+        return r.IsSuccess;
     }
 
-    string IPCRootUrl
-    {
-        get
-        {
-            string? value = null;
-            var a = ArchiSteamFarm.IPC.ArchiKestrel.ServerAddresses;
-            var loopback = IPAddress.Loopback.ToString();
-            if (a != null)
-            {
-                value = a.FirstOrDefault(x => x.Contains(loopback) && x.StartsWith(String2.Prefix_HTTP))
-                    ?? a.FirstOrDefault(x => x.Contains(loopback))
-                    ?? a.FirstOrDefault();
-            }
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                value = $"http://{loopback}:{CurrentIPCPortValue}";
-            }
-            return value;
-        }
-    }
+    string IPCRootUrl { get => $"http://{IPAddress.Loopback}:{CurrentIPCPortValue}"; }
 
     public string GetIPCUrl()
     {
-        var defaultUrl = IPCRootUrl;
-        string absoluteConfigDirectory = Path.Combine(ASFPathHelper.AppDataDirectory, SharedInfo.ConfigDirectory);
+        var ipcUrl = new Uri(IPCRootUrl);
+        string absoluteConfigDirectory = Path.Combine(SharedInfo.HomeDirectory, SharedInfo.ConfigDirectory);
         string customConfigPath = Path.Combine(absoluteConfigDirectory, SharedInfo.IPCConfigFile);
         if (File.Exists(customConfigPath))
         {
-            var configRoot = new ConfigurationBuilder().SetBasePath(absoluteConfigDirectory).AddJsonFile(SharedInfo.IPCConfigFile, false, true).Build();
-            var urlSection = configRoot.GetSection("Url").Value;
+            var jsonObj = JObject.Parse(File.ReadAllText(customConfigPath));
+            var urlSection = jsonObj.SelectToken("Kestrel.Endpoints.Http.Url")?.Value<string>();
             try
             {
                 var url = new Uri(urlSection!);
-                if (IPAddress.Any.ToString() == url.Host)
+                if (url.AbsoluteUri != ipcUrl.AbsoluteUri)
                 {
-                    return defaultUrl;
-                }
-                else
-                {
-                    return url.AbsolutePath;
+                    jsonObj["Kestrel"]!["Endpoints"]!["Http"]!["Url"] = ipcUrl.OriginalString;
+                    File.WriteAllText(customConfigPath, jsonObj.ToString());
                 }
             }
             catch
             {
-                return defaultUrl;
             }
         }
         else
         {
-            return defaultUrl;
+            var iPCConfig = new IPCConfig(ipcUrl);
+            File.WriteAllText(customConfigPath, System.Text.Json.JsonSerializer.Serialize(iPCConfig));
         }
+        CurrentIPCPortValue = ipcUrl.Port;
+        return ipcUrl.OriginalString;
     }
 
-    public int CurrentIPCPortValue { get; set; }
+    private int _currentIpcPortValue;
 
-    //public static IEnumerable<HttpMessageHandler> GetAllHandlers()
-    //{
-    //    // 动态更改运行中的代理设置，遍历 ASF 中的 HttpClientHandler 设置新的 Proxy
-    //    var asf_handler = ASF.WebBrowser?.HttpClientHandler;
-    //    if (asf_handler != null) yield return asf_handler;
-    //    var bots = Bot.BotsReadOnly?.Values;
-    //    if (bots != null)
-    //    {
-    //        foreach (var bot in bots)
-    //        {
-    //            var bot_handler = bot.ArchiWebHandler.WebBrowser.HttpClientHandler;
-    //            if (bot_handler != null) yield return bot_handler;
-    //        }
-    //    }
-    //}
-
-    string EncryptionKey
+    public int CurrentIPCPortValue
     {
-        set => ArchiCryptoHelper.SetEncryptionKey(value);
+        get
+        {
+            if (_currentIpcPortValue == default)
+            {
+                _currentIpcPortValue = ASFSettings.IPCPortId.Value;
+
+                if (ASFSettings.IPCPortOccupiedRandom.Value)
+                {
+                    if (SocketHelper.IsUsePort(_currentIpcPortValue))
+                    {
+                        _currentIpcPortValue = SocketHelper.GetRandomUnusedPort(IPAddress.Loopback);
+                        return _currentIpcPortValue;
+                    }
+                }
+            }
+            return _currentIpcPortValue;
+        }
+
+        set
+        {
+            _currentIpcPortValue = value;
+        }
     }
 
     const string ASF_CRYPTKEY = "ASF_CRYPTKEY";
     const string ASF_CRYPTKEY_DEF_VALUE = nameof(ArchiSteamFarm);
+
+    public string? EncryptionKey { get; set; }
 
     public async Task SetEncryptionKeyAsync()
     {
@@ -311,25 +468,100 @@ public partial class ArchiSteamFarmServiceImpl : ReactiveObject, IArchiSteamFarm
             await ISecureStorage.Instance.RemoveAsync(ASF_CRYPTKEY);
             result = ASF_CRYPTKEY_DEF_VALUE;
         }
-        ArchiCryptoHelper.SetEncryptionKey(result!);
+        EncryptionKey = result;
+        Toast.Show(ToastIcon.Success, BDStrings.ASF_EffectiveAfterRestart);
     }
 
     /// <summary>
     /// 尝试读取已保存的自定义密钥并应用
     /// </summary>
     /// <returns></returns>
-    static async Task ReadEncryptionKeyAsync()
+    private async Task ReadEncryptionKeyAsync()
     {
-        if (!ArchiCryptoHelper.HasDefaultCryptKey)
+        if (!string.IsNullOrEmpty(EncryptionKey))
         {
             // 当前运行中已设置了自定义密钥，则跳过
             return;
         }
         var result = await ISecureStorage.Instance.GetAsync(ASF_CRYPTKEY);
         if (!string.IsNullOrEmpty(result))
+            EncryptionKey = result;
+    }
+
+    public async Task<IApiRsp> BotResumeAsync(string botNames, CancellationToken cancellationToken = default)
+    {
+        (var isSuccess, var rsp) = VerifyApiReady<GenericResponse>();
+        if (!isSuccess) return rsp;
+        return await webApiService.Bot.ResumePost(botNames, cancellationToken);
+    }
+
+    public async Task<IApiRsp> BotPauseAsync(string botNames, BotPauseRequest request, CancellationToken cancellationToken = default)
+    {
+        (var isSuccess, var rsp) = VerifyApiReady<GenericResponse>();
+        if (!isSuccess) return rsp;
+        return await webApiService.Bot.PausePost(botNames, request, cancellationToken);
+    }
+
+    public async Task<IApiRsp> BotStopAsync(string botNames, CancellationToken cancellationToken = default)
+    {
+        (var isSuccess, var rsp) = VerifyApiReady<GenericResponse>();
+        if (!isSuccess) return rsp;
+        return await webApiService.Bot.StopPost(botNames, cancellationToken);
+    }
+
+    public async Task<IApiRsp> BotStartAsync(string botNames, CancellationToken cancellationToken = default)
+    {
+        (var isSuccess, var rsp) = VerifyApiReady<GenericResponse>();
+        if (!isSuccess) return rsp;
+        return await webApiService.Bot.StartPost(botNames, cancellationToken);
+    }
+
+    public async Task<IApiRsp<IReadOnlyDictionary<string, GamesToRedeemInBackgroundResponse>>> BotGetUsedAndUnusedKeysAsync(string botNames, CancellationToken cancellationToken = default)
+    {
+        (var isSuccess, var rsp) = VerifyApiReady<IReadOnlyDictionary<string, GamesToRedeemInBackgroundResponse>>();
+        if (!isSuccess) return rsp;
+        return await webApiService.Bot.GamesToRedeemInBackgroundGet(botNames, cancellationToken);
+    }
+
+    public async Task<IApiRsp> BotRedeemKeyAsync(string botNames, BotGamesToRedeemInBackgroundRequest request, CancellationToken cancellationToken = default)
+    {
+        (var isSuccess, var rsp) = VerifyApiReady<GenericResponse>();
+        if (!isSuccess) return rsp;
+        return await webApiService.Bot.GamesToRedeemInBackgroundPost(botNames, request, cancellationToken);
+    }
+
+    public async Task<IApiRsp> BotResetRedeemedKeysRecordAsync(string botNames, CancellationToken cancellationToken = default)
+    {
+        (var isSuccess, var rsp) = VerifyApiReady<GenericResponse>();
+        if (!isSuccess) return rsp;
+        return await webApiService.Bot.GamesToRedeemInBackgroundDelete(botNames, cancellationToken);
+    }
+
+    public async Task<IApiRsp> BotDeleteAsync(string botNames, CancellationToken cancellationToken = default)
+    {
+        (var isSuccess, var rsp) = VerifyApiReady<GenericResponse>();
+        if (!isSuccess) return rsp;
+        return await webApiService.Bot.BotDelete(botNames, cancellationToken);
+    }
+
+    private (bool isSuccess, IApiRsp<TResponseBody?>? apiRsp) VerifyApiReady<TResponseBody>()
+    {
+        string? ipc_error = null;
+        if (!ASFService.Current.IsASFRuning)
         {
-            ArchiCryptoHelper.SetEncryptionKey(result);
+            ipc_error = BDStrings.ASF_RequirRunASF;
         }
+        else if (!ASF.IsReady)
+        {
+            // IPC 未启动前无法获取正确的端口号，会导致拼接的 URL 值不正确
+            ipc_error = BDStrings.ASF_IPCIsReadyFalse;
+        }
+        if (ipc_error != null)
+        {
+            Toast.Show(ToastIcon.Error, ipc_error);
+            return (false, ApiRspHelper.Fail<TResponseBody>(ipc_error));
+        }
+        return (true, null);
     }
 }
 
