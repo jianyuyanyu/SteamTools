@@ -43,9 +43,14 @@ partial class Startup // Properties
     public bool IsDesignMode { get; set; }
 
     /// <summary>
+    /// 是否在 Steam 中运行
+    /// </summary>
+    public bool IsSteamRun { get; set; }
+
+    /// <summary>
     /// 是否最小化启动
     /// </summary>
-    public bool IsMinimize { get; private set; }
+    public bool IsMinimize { get; set; }
 
     /// <summary>
     /// 是否为代理服务
@@ -136,12 +141,12 @@ partial class Startup // Properties
     /// <summary>
     /// 当前加载的插件集合
     /// </summary>
-    HashSet<IPlugin>? plugins;
+    IReadOnlyCollection<IPlugin>? plugins;
 
     /// <summary>
     /// 当前所有的插件集合，包含禁用的插件
     /// </summary>
-    HashSet<PluginResult<IPlugin>>? pluginResults;
+    IReadOnlyCollection<PluginResult<IPlugin>>? pluginResults;
 #endif
 
     /// <summary>
@@ -150,7 +155,7 @@ partial class Startup // Properties
     /// <param name="plugins"></param>
     /// <returns></returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryGetPlugins([NotNullWhen(true)] out HashSet<IPlugin>? plugins)
+    public bool TryGetPlugins([NotNullWhen(true)] out IReadOnlyCollection<IPlugin>? plugins)
     {
 #if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
         plugins = this.plugins;
@@ -167,7 +172,7 @@ partial class Startup // Properties
     /// <param name="plugins"></param>
     /// <returns></returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryGetPluginResults([NotNullWhen(true)] out HashSet<PluginResult<IPlugin>>? pluginResults)
+    public bool TryGetPluginResults([NotNullWhen(true)] out IReadOnlyCollection<PluginResult<IPlugin>>? pluginResults)
     {
 #if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
         pluginResults = this.pluginResults;
@@ -182,8 +187,19 @@ partial class Startup // Properties
 
     public Task WaitConfiguredServices => waitConfiguredServices.Task;
 
+    static readonly Lazy<string?> _NativeLibraryPath = new(() =>
+    {
+#if WINDOWS || LINUX
+        return $"{GlobalDllImportResolver.GetLibraryPath(null)};{GlobalDllImportResolver.GetLibraryPath(null, IOPath.AppDataDirectory)}";
+#endif
+#if MACOS
+        return AppContext.BaseDirectory;
+#endif
+        return null;
+    });
+
     /// <summary>
     /// 自定义本机库加载路径
     /// </summary>
-    internal static string? NativeLibraryPath { get; set; }
+    public static string? NativeLibraryPath => _NativeLibraryPath.Value;
 }

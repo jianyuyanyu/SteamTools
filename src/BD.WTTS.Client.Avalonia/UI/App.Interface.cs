@@ -142,11 +142,56 @@ partial class App : IApplication
 
     object IApplication.CurrentPlatformUIHost => MainWindow!;
 
-    DeploymentMode IApplication.DeploymentMode => DeploymentMode.
-#if FRAMEWORK_DEPENDENT || !PUBLISH
-           FDE
-#else
-           SCD
-#endif
-         ;
+    public System.Drawing.Size? GetScreenSize()
+    {
+        try
+        {
+            var window = GetFirstOrDefaultWindow();
+            var screen = window?.Screens?.Primary;
+            if (screen != default)
+            {
+                return new(screen.Bounds.Width, screen.Bounds.Height);
+            }
+        }
+        catch
+        {
+
+        }
+        return null;
+    }
+
+    public bool? IsAnyWindowNotMinimized()
+    {
+        try
+        {
+            if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime l)
+            {
+                foreach (var window in l.Windows)
+                {
+                    static bool WindowIntersectsWithAnyScreen(Window window)
+                    {
+                        static bool IntersectsWith(Rect rect, PixelRect @this)
+                        {
+                            if (rect.X < @this.X + @this.Width && @this.X < rect.X + rect.Width && rect.Y < @this.Y + @this.Height)
+                            {
+                                return @this.Y < rect.Y + rect.Height;
+                            }
+
+                            return false;
+                        }
+                        return window.Screens.All.Any(screen => IntersectsWith(window.Bounds, screen.Bounds));
+                    }
+                    if (window.WindowState != WindowState.Minimized && WindowIntersectsWithAnyScreen(window))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        catch
+        {
+
+        }
+        return default;
+    }
 }

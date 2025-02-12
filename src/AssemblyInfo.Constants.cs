@@ -5,10 +5,46 @@ namespace BD.WTTS;
 /// </summary>
 public static partial class AssemblyInfo
 {
+    const string Version2 = "3.0";
+
     /// <summary>
-    /// 与应用程序关联的产品名称。
+    /// 语义化应用程序版本
+    /// https://semver.org/lang/zh-CN/
     /// </summary>
-    public const string Version = "3.0.0";
+    public const string Version = $"{Version2}.0";
+
+    /// <summary>
+    /// 预览版本号，范围 1~9，只增不减
+    /// </summary>
+    const string ver_for_preview = "0";
+
+    /// <summary>
+    /// RC 版本号，范围 0~9，只增不减
+    /// </summary>
+    const string ver_for_rc = "15";
+
+    public const string FileVersion = $"{Version2}.{ver_for_rc}2{ver_for_preview}.0";
+
+    //public const string InformationalVersion = Version;
+    //public const string InformationalVersion = $"{Version}-preview.{ver_for_preview}";
+    public const string InformationalVersion = $"{Version}-rc.{ver_for_rc}";
+
+#if !APP_HOST
+    /// <summary>
+    /// 当前应用程序是否为预览版本(Preview)
+    /// </summary>
+    public static bool IsPreview { get; } = InformationalVersion.Contains("preview", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 当前应用程序是否为候选版本(RC)
+    /// </summary>
+    public static bool IsReleaseCandidate { get; } = !IsPreview && InformationalVersion.Contains("rc", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 当前应用程序是否为正式版本(GA)
+    /// </summary>
+    public static bool IsGeneralAvailability { get; } = !IsPreview && !IsReleaseCandidate;
+#endif
 
     /// <summary>
     /// 与应用程序关联的产品名称。
@@ -35,7 +71,7 @@ public static partial class AssemblyInfo
     /// <summary>
     /// 与该应用程序关联的公司名称。
     /// </summary>
-    public const string Company = "长沙次元超越科技有限公司";
+    public const string Company = "江苏蒸汽凡星科技有限公司";
 
     /// <summary>
     /// 与应用程序关联的版权声明。
@@ -77,21 +113,19 @@ false
 
 #endif
 
+#if !APP_HOST
+
     #region Modules/Plugins
 
     public const string Accelerator = "Accelerator";
-
-#if !APP_HOST
 
     public const string GameAccount = "GameAccount";
 
     public const string GameList = "GameList";
 
-#endif
+    public const string SteamIdleCard = "SteamIdleCard";
 
     public const string ArchiSteamFarmPlus = "ArchiSteamFarmPlus";
-
-#if !APP_HOST
 
     public const string Authenticator = "Authenticator";
 
@@ -106,9 +140,10 @@ false
     public const string ArchiSteamFarmPlusId = "00000000-0000-0000-0000-000000000004";
     public const string AuthenticatorId = "00000000-0000-0000-0000-000000000005";
     public const string GameToolsId = "00000000-0000-0000-0000-000000000006";
-
-#endif
+    public const string SteamIdleCardId = "00000000-0000-0000-0000-000000000007";
 
     #endregion
+
+#endif
 
 }

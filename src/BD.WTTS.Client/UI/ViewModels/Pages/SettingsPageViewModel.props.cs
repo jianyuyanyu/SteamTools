@@ -33,6 +33,31 @@ public sealed partial class SettingsPageViewModel : TabItemViewModel
         set => this.RaiseAndSetIfChanged(ref _SelectFont, value);
     }
 
+    MenuTabItemViewModel _SelectDefaultPage =
+        IViewModelManager.Instance.MainWindow2.TabItems.OfType<MenuTabItemViewModel>().FirstOrDefault(
+            s =>
+            {
+                if (string.IsNullOrEmpty(UISettings.StartDefaultPageName.Value))
+                {
+                    return s.Id == "Watt Toolkit-Welcome";
+                }
+                return s.Id == UISettings.StartDefaultPageName.Value;
+            });
+
+    [IgnoreDataMember, MPIgnore, MP2Ignore, N_JsonIgnore, S_JsonIgnore]
+    public MenuTabItemViewModel SelectDefaultPage
+    {
+        get => _SelectDefaultPage;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _SelectDefaultPage, value);
+            if (!string.IsNullOrEmpty(value?.Id))
+            {
+                UISettings.StartDefaultPageName.Value = value.Id;
+            }
+        }
+    }
+
     [IgnoreDataMember, MPIgnore, MP2Ignore, N_JsonIgnore, S_JsonIgnore]
     public ICommand? SelectImage_Click { get; }
 
@@ -41,8 +66,6 @@ public sealed partial class SettingsPageViewModel : TabItemViewModel
 
     [IgnoreDataMember, MPIgnore, MP2Ignore, N_JsonIgnore, S_JsonIgnore]
     public ICommand? OpenFolder_Click { get; }
-
-    public IReadOnlyCollection<UpdateChannelType> UpdateChannels { get; }
 
     /// <summary>
     /// 点击间隔时间（秒）Windows 11 上资源管理器启动缓慢，设置一个间隔时间避免频繁点击

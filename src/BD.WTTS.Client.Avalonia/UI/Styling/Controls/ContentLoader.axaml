@@ -18,21 +18,15 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         IsVisible="{TemplateBinding IsLoading}"
-                        Spacing="8">
-                        <spp:Image2
-                            Width="150"
-                            Height="150"
+                        Spacing="10">
+                        <!--<spp:Image2
+                            Width="100"
+                            Height="100"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Bottom"
                             RenderOptions.BitmapInterpolationMode="HighQuality"
                             Source="avares://BD.WTTS.Client.Avalonia/UI/Assets/mona-loading-default.gif"
-                            Stretch="UniformToFill" />
-                        <TextBlock
-                            HorizontalAlignment="Center"
-                            Text="{ReflectionBinding Path=Res.GameList_IsLoading,
-                                                     Mode=OneWay,
-                                                     Source={x:Static s:ResourceService.Current}}"
-                            Theme="{StaticResource SubtitleTextBlockStyle}" />
+                            Stretch="UniformToFill" />-->
                         <Border
                             Width="35"
                             Height="35"
@@ -45,14 +39,26 @@
                                 Minimum="{TemplateBinding Minimum}"
                                 Value="{TemplateBinding ProgressValue}" />
                         </Border>
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            Text="{Binding Path=Res.GameList_IsLoading, Mode=OneWay, Source={x:Static s:ResourceService.Current}}"
+                            Theme="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                            IsVisible="{TemplateBinding CustomLoadingText,
+                                                        Converter={StaticResource IsNullConverter},
+                                                        ConverterParameter=invert}"
+                            Text="{TemplateBinding CustomLoadingText}"
+                            Theme="{StaticResource BodyStrongTextBlockStyle}" />
                     </StackPanel>
 
-                    <TextBlock
+                    <!--<TextBlock
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         IsVisible="{TemplateBinding IsShowNoResultText}"
                         Text="{TemplateBinding NoResultMessage}"
-                        Theme="{StaticResource SubtitleTextBlockStyle}" />
+                        Theme="{StaticResource SubtitleTextBlockStyle}" />-->
 
                     <ContentPresenter
                         Name="ContentPresenter"
@@ -60,9 +66,43 @@
                         BorderBrush="{TemplateBinding BorderBrush}"
                         BorderThickness="{TemplateBinding BorderThickness}"
                         Content="{TemplateBinding Content}"
-                        Foreground="{TemplateBinding Foreground}" />
+                        Foreground="{TemplateBinding Foreground}">
+                        <!--<ContentPresenter.IsVisible>
+                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                <Binding Path="!IsShowNoResultText" RelativeSource="{RelativeSource TemplatedParent}" />
+                                <Binding Path="!IsLoading" RelativeSource="{RelativeSource TemplatedParent}" />
+                            </MultiBinding>
+                        </ContentPresenter.IsVisible>-->
+                    </ContentPresenter>
+
+                    <Panel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <spp:Image2
+                            Width="100"
+                            Height="100"
+                            Margin="0,0,0,120"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            RenderOptions.BitmapInterpolationMode="HighQuality"
+                            Source="avares://BD.WTTS.Client.Avalonia/UI/Assets/Icons/empty.png"
+                            Stretch="UniformToFill" />
+                        <Panel.IsVisible>
+                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                <Binding Path="IsShowNoResultText" RelativeSource="{RelativeSource TemplatedParent}" />
+                                <Binding Path="!IsLoading" RelativeSource="{RelativeSource TemplatedParent}" />
+                            </MultiBinding>
+                        </Panel.IsVisible>
+                        <ContentPresenter
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Content="{TemplateBinding NoResultMessage}"
+                            Foreground="{TemplateBinding Foreground}"
+                            Theme="{StaticResource SubtitleTextBlockStyle}" />
+                    </Panel>
                 </Panel>
             </ControlTemplate>
         </Setter>
+        <Style Selector="^:loading /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Effect" Value="blur(5)" />
+        </Style>
     </ControlTheme>
 </ResourceDictionary>

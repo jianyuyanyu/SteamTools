@@ -1,4 +1,6 @@
 // ReSharper disable once CheckNamespace
+using BD.WTTS.Helpers;
+
 namespace BD.WTTS.UI.ViewModels.Abstractions;
 
 public abstract partial class ItemViewModel : ViewModelBase
@@ -84,4 +86,13 @@ public abstract partial class ItemViewModel : ViewModelBase
     }
 
     #endregion
+
+    public override void Activation()
+    {
+        base.Activation();
+
+        TracepointHelper.TrackEvent("PageActivation", new Dictionary<string, string> {
+                { "PageName", Name },
+        });
+    }
 }

@@ -16,21 +16,21 @@
         <TextBlock Margin="0,0,0,5">
             <TextBlock.Text>
                 <MultiBinding StringFormat="{}{0} 平台设置">
-                    <Binding Mode="OneWay" Path="Platform.FullName" />
+                    <CompiledBinding Mode="OneWay" Path="Platform.FullName" />
                 </MultiBinding>
             </TextBlock.Text>
         </TextBlock>
         <ui:SettingsExpander Description="{Binding PlatformSettings.PlatformPath}" IsClickEnabled="True">
             <ui:SettingsExpander.Header>
                 <MultiBinding StringFormat="{}{0} 路径">
-                    <Binding Mode="OneWay" Path="Platform.FullName" />
+                    <CompiledBinding Mode="OneWay" Path="Platform.FullName" />
                 </MultiBinding>
             </ui:SettingsExpander.Header>
             <ui:SettingsExpander.IconSource>
                 <ui:FontIconSource FontFamily="{StaticResource SymbolThemeFontFamily}" Glyph="&#xE188;" />
             </ui:SettingsExpander.IconSource>
             <ui:SettingsExpander.Footer>
-                <Button Command="{ReflectionBinding SelectProgramPath}" Content="选择路径" />
+                <Button Command="{Binding SelectProgramPath}" Content="选择路径" />
             </ui:SettingsExpander.Footer>
         </ui:SettingsExpander>
     </StackPanel>

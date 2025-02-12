@@ -1,6 +1,5 @@
 using BD.WTTS.Properties;
 using BD.WTTS.UI.Views.Pages;
-using System;
 
 namespace BD.WTTS.Plugins;
 
@@ -17,17 +16,16 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
 
     public sealed override string UniqueEnglishName => moduleName;
 
-    public sealed override string Description => "可支持自行添加多平台账号快速切换功能，Steam 可自动读取账号信息，其它平台请手动添加账号信息。";
+    public sealed override string Description => "可支持自行添加多平台账号快速切换功能，Steam 可自动读取账号信息，其它平台请手动添加账号信息";
 
     protected sealed override string? AuthorOriginalString => null;
 
-    public sealed override object? Icon => new MemoryStream(Resources.userswitcher); //"avares://BD.WTTS.Client.Plugins.GameAccount/UI/Assets/userswitcher.ico";
+    public sealed override object? Icon => Resources.userswitcher; //"avares://BD.WTTS.Client.Plugins.GameAccount/UI/Assets/userswitcher.ico";
 
-    public override IEnumerable<TabItemViewModel>? GetMenuTabItems()
+    public override IEnumerable<MenuTabItemViewModel>? GetMenuTabItems()
     {
-        yield return new MenuTabItemViewModel()
+        yield return new MenuTabItemViewModel(this, nameof(Strings.UserFastChange))
         {
-            ResourceKeyOrName = nameof(Strings.UserFastChange),
             PageType = typeof(GameAccountPage),
             IsResourceGet = true,
             IconKey = Icon,
@@ -51,5 +49,11 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
     public override IEnumerable<(Action<IServiceCollection>? @delegate, bool isInvalid, string name)>? GetConfiguration(bool directoryExists)
     {
         yield return GetConfiguration<GameAccountSettings_>(directoryExists);
+    }
+
+    public override ValueTask OnInitializeAsync()
+    {
+        IViewModelManager.Instance.Get<GameAccountPageViewModel>();
+        return default;
     }
 }

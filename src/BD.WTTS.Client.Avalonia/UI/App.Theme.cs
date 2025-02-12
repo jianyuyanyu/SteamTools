@@ -1,10 +1,13 @@
 using BD.WTTS.UI.Styling;
+using LiveChartsCore;
+using LiveChartsCore.SkiaSharpView;
+using SkiaSharp;
 
 namespace BD.WTTS.UI;
 
 partial class App
 {
-    const AppTheme _DefaultActualTheme = AppTheme.Dark;
+    const AppTheme _DefaultActualTheme = AppTheme.FollowingSystem;
 
     AppTheme IApplication.DefaultActualTheme => _DefaultActualTheme;
 
@@ -57,6 +60,15 @@ partial class App
         };
 
         RequestedThemeVariant = mode;
+
+        if (value == AppTheme.Light)
+        {
+            LiveCharts.Configure(settings => settings.AddLightTheme());
+        }
+        else
+        {
+            LiveCharts.Configure(settings => settings.AddDarkTheme());
+        }
     }
 
     public static void SetThemeAccent(string? colorHex)
@@ -78,25 +90,24 @@ partial class App
         if (Color.TryParse(colorHex, out var color))
         {
             thm.CustomAccentColor = color;
+            thm.PreferUserAccentColor = false;
         }
-        else
+        else if (colorHex.Equals(bool.TrueString, StringComparison.OrdinalIgnoreCase))
         {
-            if (colorHex.Equals(bool.TrueString, StringComparison.OrdinalIgnoreCase))
-            {
-                thm.CustomAccentColor = null;
-            }
-        }
-
-        if (OperatingSystem.IsWindows())
-        {
-            if (OperatingSystem.IsWindowsVersionAtLeast(6, 2))
-                thm.PreferUserAccentColor = true;
-            else
-                thm.PreferUserAccentColor = false;
-        }
-        else
-        {
+            thm.CustomAccentColor = null;
             thm.PreferUserAccentColor = true;
         }
+
+        //if (OperatingSystem.IsWindows())
+        //{
+        //    if (OperatingSystem.IsWindowsVersionAtLeast(6, 2))
+        //        thm.PreferUserAccentColor = true;
+        //    else
+        //        thm.PreferUserAccentColor = false;
+        //}
+        //else
+        //{
+        //  thm.PreferUserAccentColor = true;
+        //}
     }
 }

@@ -18,15 +18,37 @@ public abstract class AppUpdateServiceBaseImpl : ReactiveObject, IAppUpdateServi
 
     public bool ShowNewVersionWindowOnMainOpen { get; protected set; }
 
-    protected virtual Task ShowNewVersionWindowAsync()
+    protected virtual async Task ShowNewVersionWindowAsync()
     {
-        return Task.CompletedTask;
+        await MainThread2.InvokeOnMainThreadAsync(async () =>
+        {
+            var result = await MessageBox.ShowAsync(NewVersionInfoDesc,
+                NewVersionInfoTitle,
+                MessageBox.Button.OKCancel);
+            if (result.IsOK())
+            {
+                StartUpdateCommand.Invoke();
+            }
+        });
     }
 
-    public virtual void OnMainOpenTryShowNewVersionWindow()
+    protected virtual void ShowNewVersionNotifyAsync()
     {
-
+        notification.Notify(
+            AppResources.NewVersionUpdateNotifyText_.Format(NewVersionInfo?.Version),
+            NotificationType.NewVersion);
     }
+
+    public virtual async void OnMainOpenTryShowNewVersionWindow()
+    {
+        if (ShowNewVersionWindowOnMainOpen)
+        {
+            ShowNewVersionWindowOnMainOpen = false;
+            await ShowNewVersionWindowAsync();
+        }
+    }
+
+    protected abstract bool HasActiveWindow();
 
     public AppUpdateServiceBaseImpl(
         IApplication application,
@@ -96,10 +118,15 @@ public abstract class AppUpdateServiceBaseImpl : ReactiveObject, IAppUpdateServi
     /// </summary>
     protected virtual async void OnExistNewVersion()
     {
-        var result = await MessageBox.ShowAsync(NewVersionInfoDesc, NewVersionInfoTitle, MessageBox.Button.OKCancel);
-        if (result.IsOK())
+        var hasActiveWindow = HasActiveWindow();
+        if (hasActiveWindow)
         {
-            StartUpdateCommand.Invoke();
+            await ShowNewVersionWindowAsync();
+        }
+        else
+        {
+            ShowNewVersionWindowOnMainOpen = true;
+            ShowNewVersionNotifyAsync();
         }
     }
 
@@ -141,10 +168,30 @@ public abstract class AppUpdateServiceBaseImpl : ReactiveObject, IAppUpdateServi
             deploymentMode);
         if (rsp.IsSuccess)
         {
-            if (!rsp.Content.HasValue() || rsp.Content?.Version == AssemblyInfo.Version)
+            static bool IsNewVersion(AppVersionDTO? value)
+            {
+                if (value.HasValue())
+                {
+                    if (value.Version != AssemblyInfo.FileVersion)
+                    {
+                        if (Version.TryParse(value.Version, out var newVersion) &&
+                            Version.TryParse(AssemblyInfo.FileVersion, out var thisVersion))
+                        {
+                            if (newVersion <= thisVersion)
+                            {
+                                return false;
+                            }
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            if (!IsNewVersion(rsp.Content))
             {
                 IsExistUpdate = false;
-                if (showIsExistUpdateFalse) toast.Show(AppResources.IsExistUpdateFalse);
+                if (showIsExistUpdateFalse) toast.Show(ToastIcon.None, AppResources.IsExistUpdateFalse);
             }
             else
             {
@@ -283,7 +330,7 @@ public abstract class AppUpdateServiceBaseImpl : ReactiveObject, IAppUpdateServi
                 goto end;
             }
 
-            var isAndroid = OperatingSystem2.IsAndroid();
+            var isAndroid = OperatingSystem.IsAndroid();
             var isDesktop = IApplication.IsDesktop();
             if (!isAndroid && !isDesktop)
             {
@@ -338,7 +385,7 @@ public abstract class AppUpdateServiceBaseImpl : ReactiveObject, IAppUpdateServi
                             Fail(FailCode.UpdatePackCacheHashInvalidDeleteFileFail_, packFilePath);
                             goto end;
                         }
-                        toast.Show(AppResources.UpdatePackCacheHashInvalidDeleteFileTrue);
+                        toast.Show(ToastIcon.Error, AppResources.UpdatePackCacheHashInvalidDeleteFileTrue);
                     }
                 }
 
@@ -454,7 +501,7 @@ public abstract class AppUpdateServiceBaseImpl : ReactiveObject, IAppUpdateServi
         void Fail(FailCode failCode, params string[] args)
         {
             var error = failCode.ToString2(args);
-            toast.Show(error);
+            toast.Show(ToastIcon.Error, error);
             Browser2.Open(string.Format(Constants.Urls.OfficialWebsite_AppUpdateFailCode_, (byte)failCode));
             OnReport(100f);
         }
@@ -515,7 +562,7 @@ public abstract class AppUpdateServiceBaseImpl : ReactiveObject, IAppUpdateServi
             }
             else
             {
-                toast.Show(AppResources.UpdateUnpackFail);
+                toast.Show(ToastIcon.Error, AppResources.UpdateUnpackFail);
                 OnReport(100f);
                 IsNotStartUpdateing = true;
             }

@@ -1,3 +1,5 @@
+using dotnetCampus.Ipc.Pipes;
+
 namespace BD.WTTS.Plugins.Abstractions;
 
 /// <summary>
@@ -16,7 +18,7 @@ public partial interface IPlugin
     /// 获取当前插件需要加载的菜单项视图模型
     /// </summary>
     /// <returns></returns>
-    IEnumerable<TabItemViewModel>? GetMenuTabItems();
+    IEnumerable<MenuTabItemViewModel>? GetMenuTabItems();
 
     /// <summary>
     /// 获取插件的配置项
@@ -48,6 +50,10 @@ public partial interface IPlugin
     void ConfigureRequiredServices(
         IServiceCollection services,
         Startup startup);
+
+    void ConfigureServices(IpcProvider ipcProvider,
+        Startup startup)
+    { }
 
     /// <summary>
     /// 配置 AutoMapper
@@ -82,7 +88,7 @@ public partial interface IPlugin
     ValueTask OnPeerConnected(bool isReconnected);
 
     /// <summary>
-    /// 带参数启动时执行
+    /// 解析程序带参数启动时执行指令
     /// </summary>
     /// <returns></returns>
     ValueTask OnCommandRun(params string[] commandParams);

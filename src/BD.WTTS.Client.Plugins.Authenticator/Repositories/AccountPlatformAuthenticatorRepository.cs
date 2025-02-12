@@ -207,20 +207,23 @@ internal sealed class AccountPlatformAuthenticatorRepository : Repository<Accoun
             IsNotLocal = !isLocal,
             IsNeedSecondaryPassword = !notSecondaryPassword,
             Index = item.Index,
-            Created = item.Created,
-            LastUpdate = item.LastUpdate,
+            Created = item.Created == default ? DateTimeOffset.Now : item.Created,
+            LastUpdate = DateTimeOffset.Now,
         };
         return entity;
     }
 
-    public async Task InsertOrUpdateAsync(IAuthenticatorDTO item, bool isLocal,
+    public async Task<(bool isSuccess, bool isUpdate)> InsertOrUpdateAsync(IAuthenticatorDTO item, bool isLocal,
         string? secondaryPassword = null)
     {
+
         var entity = await ConvertAsync(item, isLocal, secondaryPassword);
 
-        await InsertOrUpdateAsync(entity);
+        var r = await InsertOrUpdateAsync(entity);
 
         item.Id = entity.Id;
+
+        return (r.rowCount > 0, r.result == DbRowExecResult.Update);
     }
 
     public async Task DeleteAsync(ushort id) => await base.DeleteAsync(id);

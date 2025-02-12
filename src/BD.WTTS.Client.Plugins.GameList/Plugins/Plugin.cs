@@ -17,17 +17,16 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
 
     public sealed override string UniqueEnglishName => moduleName;
 
-    public sealed override string Description => "管理库存游戏";
+    public sealed override string Description => "管理 Steam 库存游戏信息，Steam 启动时加载当前账号库存，未启动时加载 Steam 本地缓存数据";
 
     protected sealed override string? AuthorOriginalString => null;
 
-    public sealed override object? Icon => new MemoryStream(Resources.game); //"avares://BD.WTTS.Client.Plugins.GameList/UI/Assets/game.ico";
+    public sealed override object? Icon => Resources.game; //"avares://BD.WTTS.Client.Plugins.GameList/UI/Assets/game.ico";
 
-    public override IEnumerable<TabItemViewModel>? GetMenuTabItems()
+    public override IEnumerable<MenuTabItemViewModel>? GetMenuTabItems()
     {
-        yield return new MenuTabItemViewModel()
+        yield return new MenuTabItemViewModel(this, nameof(Strings.GameList))
         {
-            ResourceKeyOrName = nameof(Strings.GameList),
             PageType = typeof(MainFramePage),
             IsResourceGet = true,
             IconKey = Icon,

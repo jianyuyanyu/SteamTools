@@ -18,7 +18,7 @@ public sealed class IdleAppsPageViewModel : ViewModelBase
 
     public IdleAppsPageViewModel()
     {
-        CompositeDisposable.Add(GameLibrarySettings.AFKAppList.Subscribe(_ => Refresh_Click()));
+        CompositeDisposable.Add(GameLibrarySettings.AFKAppList.Subscribe(_ => Refresh_Click(), false));
 
         RunStopBtnCommand = ReactiveCommand.Create<SteamApp>(RunStopBtn_Click);
         DeleteButtonCommand = ReactiveCommand.Create<SteamApp>(DeleteButton_Click);
@@ -68,7 +68,7 @@ public sealed class IdleAppsPageViewModel : ViewModelBase
                         RunState = false;
                         GameLibrarySettings.AFKAppList.Value.Clear();
                         GameLibrarySettings.AFKAppList.RaiseValueChanged();
-                        Toast.Show(Strings.GameList_DeleteSuccess);
+                        Toast.Show(ToastIcon.Success, Strings.GameList_DeleteSuccess);
                     });
                 }
             }
@@ -98,7 +98,7 @@ public sealed class IdleAppsPageViewModel : ViewModelBase
                             ChangeRunTxt();
                             GameLibrarySettings.AFKAppList.Value.Remove(app.AppId);
                             GameLibrarySettings.AFKAppList.RaiseValueChanged();
-                            Toast.Show(Strings.GameList_DeleteSuccess);
+                            Toast.Show(ToastIcon.Success, Strings.GameList_DeleteSuccess);
                         });
                     }
                 }
@@ -168,16 +168,16 @@ public sealed class IdleAppsPageViewModel : ViewModelBase
                     }
                 }
                 RunLoaingState = false;
-                Toast.Show(Strings.GameList_OperationSuccess);
+                Toast.Show(ToastIcon.Success, Strings.GameList_OperationSuccess);
             }
             else
             {
-                Toast.Show(Strings.GameList_LoaingTips);
+                Toast.Show(ToastIcon.Warning, Strings.GameList_LoaingTips);
             }
         }
         else
         {
-            await MessageBox.ShowAsync(Strings.GameList_SteamNotRuning, button: MessageBox.Button.OK);
+            await MessageBox.ShowAsync(Strings.SteamNotRuning, button: MessageBox.Button.OK);
         }
     }
 
@@ -202,14 +202,22 @@ public sealed class IdleAppsPageViewModel : ViewModelBase
         }
         else
         {
-            await MessageBox.ShowAsync(Strings.GameList_SteamNotRuning, button: MessageBox.Button.OK);
+            await MessageBox.ShowAsync(Strings.SteamNotRuning, button: MessageBox.Button.OK);
         }
     }
 
-    public void Refresh_Click()
+    public async void Refresh_Click()
     {
         var list = new ObservableCollection<SteamApp>();
         if (GameLibrarySettings.AFKAppList.Any_Nullable())
+        {
+            int runOtherAppCount = 0;
+
+            while (SteamConnectService.Current.IsLoadingGameList)
+            {
+                await Task.Delay(500);
+            }
+
             foreach (var item in GameLibrarySettings.AFKAppList.Value!)
             {
                 var appInfo = SteamConnectService.Current.SteamApps.Items.FirstOrDefault(x => x.AppId == item.Key);
@@ -222,7 +230,7 @@ public sealed class IdleAppsPageViewModel : ViewModelBase
                         if (!runState.Process.HasExited)
                         {
                             appInfo.Process = runState.Process;
-                            appInfo.Process.Exited += (object? _, EventArgs _) =>
+                            appInfo.Process.Exited += (_, _) =>
                             {
                                 SteamConnectService.Current.RuningSteamApps.TryRemove(appInfo.AppId, out runState);
                             };
@@ -239,6 +247,7 @@ public sealed class IdleAppsPageViewModel : ViewModelBase
                 }
                 else
                 {
+                    runOtherAppCount++;
                     SteamConnectService.Current.RuningSteamApps.TryGetValue(item.Key, out var runState);
                     runState?.Process?.KillEntireProcessTree();
                     list.Add(new SteamApp
@@ -249,6 +258,11 @@ public sealed class IdleAppsPageViewModel : ViewModelBase
                 }
             }
 
+            if (runOtherAppCount > 0)
+            {
+                Toast.Show(ToastIcon.Warning, Strings.GameList_RunOtherAppCount_.Format(runOtherAppCount));
+            }
+        }
         IdleGameList = list;
         ChangeRunTxt(true);
     }

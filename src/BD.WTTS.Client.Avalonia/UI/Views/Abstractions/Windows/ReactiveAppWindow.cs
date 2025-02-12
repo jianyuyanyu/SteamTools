@@ -1,5 +1,3 @@
-using BD.WTTS.Extensions;
-
 namespace BD.WTTS.UI.Views.Windows;
 
 /// <summary>
@@ -16,11 +14,31 @@ public class ReactiveAppWindow<TViewModel> : AppWindow, IViewFor<TViewModel>, IV
     public static readonly StyledProperty<bool> IsSaveWindowSizeProperty = AvaloniaProperty
         .Register<ReactiveAppWindow<TViewModel>, bool>(nameof(IsSaveWindowSize), true);
 
+    private bool _isInitialize;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ReactiveAppWindow{TViewModel}"/> class.
     /// </summary>
     public ReactiveAppWindow() : base()
     {
+#if WINDOWS
+        if (OperatingSystem2.IsWindows() && !Design.IsDesignMode)
+        {
+            if (!GeneralSettings.GPU.Value)
+            {
+                var hWND = this.TryGetPlatformHandle()?.Handle;
+                if (hWND != null)
+                    IPlatformService.Instance.BeautifyTheWindow(hWND.Value);
+            }
+            else if (UISettings.WindowBackgroundMaterial.Value is WindowBackgroundMaterial.None or WindowBackgroundMaterial.Blur)
+            {
+                var hWND = this.TryGetPlatformHandle()?.Handle;
+                if (hWND != null)
+                    IPlatformService.Instance.BeautifyTheWindow(hWND.Value);
+            }
+        }
+#endif
+
         // This WhenActivated block calls ViewModel's WhenActivated
         // block if the ViewModel implements IActivatableViewModel.
         this.WhenActivated(disposables => { });
@@ -36,7 +54,7 @@ public class ReactiveAppWindow<TViewModel> : AppWindow, IViewFor<TViewModel>, IV
 
         //SystemDecorations = SystemDecorations.BorderOnly;
         Background = null;
-        TransparencyBackgroundFallback = Brushes.Transparent;
+        TransparencyBackgroundFallback = OperatingSystem2.IsMacOS() ? Brushes.Black : Brushes.Transparent;
         TransparencyLevelHint = new WindowTransparencyLevel[] { UISettings.WindowBackgroundMaterial.Value.ToWindowTransparencyLevel() };
 
         if (IsSaveWindowSize)
@@ -47,14 +65,6 @@ public class ReactiveAppWindow<TViewModel> : AppWindow, IViewFor<TViewModel>, IV
                 SizePosition = sizePosition;
             }
         }
-
-        //this.GetObservable(TransparencyLevelHintProperty)
-        //    .Subscribe(x =>
-        //    {
-        //        PseudoClasses.Set(":transparent", TransparencyLevelHint == WindowTransparencyLevel.Mica ||
-        //            TransparencyLevelHint == WindowTransparencyLevel.Blur ||
-        //            TransparencyLevelHint == WindowTransparencyLevel.AcrylicBlur);
-        //    });
 
         //UISettings.EnableCustomBackgroundImage.ValueChanged += (sender, e) =>
         //{
@@ -119,27 +129,32 @@ public class ReactiveAppWindow<TViewModel> : AppWindow, IViewFor<TViewModel>, IV
             {
                 var primaryScreenBounds = screen.Bounds;
 
-                if (CanResize)
+                if (CanResize && !_isInitialize && !IsVisible)
                 {
+                    WindowStartupLocation = WindowStartupLocation.Manual;
+                    var scalingOffset = 31 - ((screen.Scaling - 1) / 0.5); // appwindow偏移量
+
                     if (SizePosition.Width > 0 &&
                         primaryScreenBounds.Width >= SizePosition.Width)
                         Width = SizePosition.Width;
 
                     if (SizePosition.Height > 0 &&
                         primaryScreenBounds.Height >= SizePosition.Height)
-                        Height = SizePosition.Height;
+                        Height = SizePosition.Height - scalingOffset;
 
                     if (SizePosition.X > 0 && SizePosition.Y > 0)
                     {
-                        var leftTopPoint = new PixelPoint(SizePosition.X, SizePosition.Y);
+                        var offsetY = (int)Math.Round(scalingOffset * screen.Scaling);
+                        //var offsetY = scalingOffset;
+                        var leftTopPoint = new PixelPoint(SizePosition.X, SizePosition.Y + offsetY);
                         var rightBottomPoint = new PixelPoint(SizePosition.X + (int)Width, SizePosition.Y + (int)Height);
                         if (primaryScreenBounds.Contains(leftTopPoint) &&
                            primaryScreenBounds.Contains(rightBottomPoint))
                         {
                             Position = leftTopPoint;
-                            WindowStartupLocation = WindowStartupLocation.Manual;
                         }
                     }
+                    _isInitialize = true;
                 }
             }
         }

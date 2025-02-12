@@ -1,9 +1,11 @@
+using SystemPlatform = System.Runtime.Devices.Platform;
+
 namespace BD.WTTS.Models;
 
 public sealed partial class PlatformAccount : ReactiveObject
 {
     [Reactive, S_JsonIgnore, MP2Ignore, N_JsonIgnore]
-    public ObservableCollection<IAccount>? Accounts { get; set; }
+    public ObservableCollection<IAccount> Accounts { get; set; }
 
     [Reactive, S_JsonIgnore, MP2Ignore, N_JsonIgnore]
     public bool IsEnable { get; set; }
@@ -23,6 +25,8 @@ public sealed partial class PlatformAccount : ReactiveObject
     public bool IsExitBeforeInteract { get; set; }
 
     public bool IsRegDeleteOnClear { get; set; }
+
+    public bool AllFilesRequired { get; set; }
 
     public string? ExeExtraArgs { get; set; }
 
@@ -71,6 +75,9 @@ public sealed partial class PlatformAccount : ReactiveObject
     [S_JsonIgnore, MP2Ignore, N_JsonIgnore]
     public bool IsSteamPlatform => Platform == ThirdpartyPlatform.Steam;
 
+    [S_JsonIgnore, MP2Ignore, N_JsonIgnore]
+    public bool IsWindwos => IsSteamPlatform && DeviceInfo2.Platform() == SystemPlatform.Windows;
+
     public string RegJsonPath(string accName) => Path.Combine(PlatformLoginCache, accName, "reg.json");
 
     public ICommand SwapToAccountCommand { get; }
@@ -86,4 +93,6 @@ public sealed partial class PlatformAccount : ReactiveObject
     public ICommand CopyCommand { get; }
 
     public ICommand OpenLinkCommand { get; }
+
+    public ICommand CreateShortcutCommand { get; }
 }

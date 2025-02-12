@@ -1,15 +1,17 @@
+using Avalonia.Controls;
+
 namespace BD.WTTS.UI.Views.Controls;
 
 public class OptionsDisplayItem : TemplatedControl
 {
-    public static readonly StyledProperty<string> HeaderProperty =
-        AvaloniaProperty.Register<OptionsDisplayItem, string>(nameof(Header));
+    public static readonly StyledProperty<object?> HeaderProperty =
+        AvaloniaProperty.Register<OptionsDisplayItem, object?>(nameof(Header));
 
-    public static readonly StyledProperty<string> DescriptionProperty =
-        AvaloniaProperty.Register<OptionsDisplayItem, string>(nameof(Description));
+    public static readonly StyledProperty<object?> DescriptionProperty =
+        AvaloniaProperty.Register<OptionsDisplayItem, object?>(nameof(Description));
 
-    public static readonly StyledProperty<FAIconElement> IconProperty =
-        AvaloniaProperty.Register<OptionsDisplayItem, FAIconElement>(nameof(Icon));
+    public static readonly StyledProperty<object?> IconProperty =
+        AvaloniaProperty.Register<OptionsDisplayItem, object?>(nameof(Icon));
 
     public static readonly StyledProperty<bool> NavigatesProperty =
         AvaloniaProperty.Register<OptionsDisplayItem, bool>(nameof(Navigates));
@@ -29,19 +31,19 @@ public class OptionsDisplayItem : TemplatedControl
     public static readonly StyledProperty<ICommand> NavigationCommandProperty =
         AvaloniaProperty.Register<OptionsDisplayItem, ICommand>(nameof(NavigationCommand));
 
-    public string Header
+    public object? Header
     {
         get => GetValue(HeaderProperty);
         set => SetValue(HeaderProperty, value);
     }
 
-    public string Description
+    public object? Description
     {
         get => GetValue(DescriptionProperty);
         set => SetValue(DescriptionProperty, value);
     }
 
-    public FAIconElement Icon
+    public object? Icon
     {
         get => GetValue(IconProperty);
         set => SetValue(IconProperty, value);
@@ -112,7 +114,7 @@ public class OptionsDisplayItem : TemplatedControl
         }
         else if (change.Property == DescriptionProperty)
         {
-            PseudoClasses.Set(":desc", !string.IsNullOrEmpty(change.GetNewValue<string>()));
+            PseudoClasses.Set(":desc", change.GetNewValue<object?>() != null);
         }
         else if (change.Property == IsExpandedProperty)
             PseudoClasses.Set(":expanded", change.GetNewValue<bool>());
@@ -124,7 +126,7 @@ public class OptionsDisplayItem : TemplatedControl
     {
         base.OnApplyTemplate(e);
 
-        _layoutRoot = e.NameScope.Find<FABorder>("LayoutRoot");
+        _layoutRoot = e.NameScope.Find<Border>("LayoutRoot");
         if (_layoutRoot != null)
         {
             _layoutRoot.PointerPressed += OnLayoutRootPointerPressed;
@@ -170,5 +172,5 @@ public class OptionsDisplayItem : TemplatedControl
 
     private bool _isPressed;
     private bool _isExpanded;
-    private FABorder? _layoutRoot;
+    private Border? _layoutRoot;
 }

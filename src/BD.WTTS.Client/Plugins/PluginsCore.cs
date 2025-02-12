@@ -17,6 +17,38 @@ public static class PluginsCore
         {
 
         }
+
+        protected override Assembly? Load(AssemblyName assemblyName)
+        {
+            var assemblyLoadContext = DefaultAssemblyLoadContext;
+            if (assemblyLoadContext != this)
+            {
+                try
+                {
+                    var assembly = assemblyLoadContext.LoadFromAssemblyName(assemblyName);
+                    if (assembly != null)
+                    {
+                        return assembly;
+                    }
+                }
+                catch
+                {
+
+                }
+            }
+            return base.Load(assemblyName);
+        }
+    }
+
+    static AssemblyLoadContext DefaultAssemblyLoadContext
+    {
+        get
+        {
+            // 在 Windows 上通过自定义 AppHost 程序集加载上下文为 IsolatedComponentLoadContext 而不是 Default
+            var assemblyLoadContext = AssemblyLoadContext.GetLoadContext(typeof(PluginsCore).Assembly);
+            assemblyLoadContext ??= AssemblyLoadContext.Default;
+            return assemblyLoadContext;
+        }
     }
 
     static DisablePluginsAssemblyLoadContext disablePluginsAssemblyLoadContext = new();
@@ -129,7 +161,7 @@ public static class PluginsCore
             return default;
         }
 
-        public IEnumerable<TabItemViewModel>? GetMenuTabItems()
+        public IEnumerable<MenuTabItemViewModel>? GetMenuTabItems()
         {
             return default;
         }
@@ -183,9 +215,7 @@ public static class PluginsCore
         }
         else
         {
-            // 在 Windows 上通过自定义 AppHost 程序集加载上下文为 IsolatedComponentLoadContext 而不是 Default
-            assemblyLoadContext = AssemblyLoadContext.GetLoadContext(typeof(PluginsCore).Assembly);
-            assemblyLoadContext ??= AssemblyLoadContext.Default;
+            assemblyLoadContext = DefaultAssemblyLoadContext;
         }
         var assembly = assemblyLoadContext.LoadFromAssemblyPath(assemblyPath);
         return assembly;
@@ -198,61 +228,66 @@ public static class PluginsCore
     {
         HashSet<PluginResult<Assembly>>? assemblies = null;
 #if DEBUG // DEBUG 模式遍历项目查找模块
-        var modules = loadModules.Any_Nullable() ? loadModules : new[] {
-            Accelerator,
-            GameAccount,
-            GameList,
-            ArchiSteamFarmPlus,
-            Authenticator,
-            GameTools,
-        };
-        foreach (var item in modules)
+        var projPath = ProjectUtils.ProjPath;
+        if (!string.IsNullOrWhiteSpace(projPath))
         {
-            var disable = disablePluginNames != null && disablePluginNames.Contains(item);
-
-            //HashSet<string?>? entryAssemblyNames_ = null;
-            //HashSet<string?> GetEntryAssemblyNames()
-            //{
-            //    entryAssemblyNames_ ??= new HashSet<string?>(DependencyContext.Load(Assembly.GetEntryAssembly()!)?.GetDefaultAssemblyNames().Select(x => x.Name) ?? Array.Empty<string?>());
-            //    return entryAssemblyNames_;
-            //}
-
-            var assemblyPath = Path.Combine(ProjectUtils.ProjPath, "src", $"BD.WTTS.Client.Plugins.{item}", "bin", "Debug", ProjectUtils.tfm, $"BD.WTTS.Client.Plugins.{item}.dll");
-            if (File.Exists(assemblyPath))
+            var modules = loadModules.Any_Nullable() ? loadModules : new[] {
+                Accelerator,
+                GameAccount,
+                GameList,
+                ArchiSteamFarmPlus,
+                Authenticator,
+                GameTools,
+                SteamIdleCard,
+            };
+            foreach (var item in modules)
             {
-                Assembly assembly;
-                try
-                {
-                    assembly = LoadFrom(disable, assemblyPath);
-                    //var assemblyNames = DependencyContext.Load(assembly)?.GetDefaultAssemblyNames()?.ToArray();
-                    //if (assemblyNames.Any_Nullable())
-                    //{
-                    //    var entryAssemblyNames = GetEntryAssemblyNames();
-                    //    assemblyNames = assemblyNames.Where(x => !entryAssemblyNames!.Contains(x.Name)).ToArray();
-                    //    foreach (var assemblyName in assemblyNames)
-                    //    {
-                    //        try
-                    //        {
-                    //            Assembly.Load(assemblyName);
-                    //        }
-                    //        catch (Exception e)
-                    //        {
-                    //            Log.Error(TAG, e, $"AssemblyLoad fail, assemblyName: {assemblyName}");
-                    //        }
-                    //    }
-                    //}
-                }
-                catch (Exception e)
-                {
-                    Log.Error(TAG, e, $"AssemblyLoadFrom fail, assemblyPath: {assemblyPath}");
-                    continue;
-                }
+                var disable = disablePluginNames != null && disablePluginNames.Contains(item);
 
-                assemblies ??= new();
-                assemblies.Add(new(disable, assembly));
+                //HashSet<string?>? entryAssemblyNames_ = null;
+                //HashSet<string?> GetEntryAssemblyNames()
+                //{
+                //    entryAssemblyNames_ ??= new HashSet<string?>(DependencyContext.Load(Assembly.GetEntryAssembly()!)?.GetDefaultAssemblyNames().Select(x => x.Name) ?? Array.Empty<string?>());
+                //    return entryAssemblyNames_;
+                //}
+
+                var assemblyPath = Path.Combine(projPath, "src", $"BD.WTTS.Client.Plugins.{item}", "bin", "Debug", ProjectUtils.tfm, $"BD.WTTS.Client.Plugins.{item}.dll");
+                if (File.Exists(assemblyPath))
+                {
+                    Assembly assembly;
+                    try
+                    {
+                        assembly = LoadFrom(disable, assemblyPath);
+                        //var assemblyNames = DependencyContext.Load(assembly)?.GetDefaultAssemblyNames()?.ToArray();
+                        //if (assemblyNames.Any_Nullable())
+                        //{
+                        //    var entryAssemblyNames = GetEntryAssemblyNames();
+                        //    assemblyNames = assemblyNames.Where(x => !entryAssemblyNames!.Contains(x.Name)).ToArray();
+                        //    foreach (var assemblyName in assemblyNames)
+                        //    {
+                        //        try
+                        //        {
+                        //            Assembly.Load(assemblyName);
+                        //        }
+                        //        catch (Exception e)
+                        //        {
+                        //            Log.Error(TAG, e, $"AssemblyLoad fail, assemblyName: {assemblyName}");
+                        //        }
+                        //    }
+                        //}
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Error(TAG, e, $"AssemblyLoadFrom fail, assemblyPath: {assemblyPath}");
+                        continue;
+                    }
+
+                    assemblies ??= new();
+                    assemblies.Add(new(disable, assembly));
+                }
             }
         }
-#else
+#endif
         var pluginsPath = Path.Combine(AppContext.BaseDirectory, "modules");
         if (Directory.Exists(pluginsPath))
         {
@@ -313,7 +348,6 @@ public static class PluginsCore
                 }
             }
         }
-#endif
         return assemblies;
     }
 
@@ -351,9 +385,11 @@ public static class PluginsCore
         try
         {
             using CompositionHost container = configuration.CreateContainer();
-            foreach (var plugin in container.GetExports<IPlugin>())
+            var exports = container.GetExports<IPlugin>().ToArray();
+            foreach (var plugin in exports)
             {
-                if (string.Equals(plugin.UniqueEnglishName,
+                if (string.IsNullOrWhiteSpace(plugin.UniqueEnglishName) ||
+                    string.Equals(plugin.UniqueEnglishName,
                     IPlatformService.IPCRoot.moduleName,
                     StringComparison.OrdinalIgnoreCase))
                 {
@@ -444,7 +480,7 @@ public static class PluginsCore
     //    return plugins!;
     //}
 
-    internal static HashSet<PluginResult<IPlugin>>? InitPlugins(
+    internal static SortedSet<PluginResult<IPlugin>>? InitPlugins(
         HashSet<string>? disablePluginNames = null,
         params string[] loadModules)
     {
@@ -454,7 +490,24 @@ public static class PluginsCore
         var assemblies_ = VerifyAssemblies(assemblies).ToArray();
         if (!assemblies_.Any()) return null;
 
-        HashSet<PluginResult<IPlugin>> pluginResults = new();
+        static int OrderPlugin(IPlugin plugin) => plugin.UniqueEnglishName switch
+        {
+            Accelerator => 25,
+            GameAccount => 35,
+            GameList => 45,
+            Authenticator => 55,
+            ArchiSteamFarmPlus => 65,
+            SteamIdleCard => 75,
+            GameTools => 85,
+            _ => ushort.MaxValue,
+        };
+
+        var comparer = ComparerBuilder.For<PluginResult<IPlugin>>()
+            .OrderBy(x => x.IsDisable)
+            .ThenBy(x => x.Data.IsOfficial, descending: true)
+            .ThenBy(x => OrderPlugin(x.Data))
+            .ThenBy(x => x.Data.UniqueEnglishName);
+        SortedSet<PluginResult<IPlugin>> pluginResults = new(comparer);
         HashSet<IPlugin> disablePlugins = new();
         HashSet<IPlugin> activePlugins = new();
         GetExports(activePlugins, disablePlugins, assemblies_.Where(x => !x.IsDisable).Select(x => x.Data));

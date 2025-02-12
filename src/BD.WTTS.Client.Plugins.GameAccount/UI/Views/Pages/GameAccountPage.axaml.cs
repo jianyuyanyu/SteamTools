@@ -3,6 +3,8 @@ using AppResources = BD.WTTS.Client.Resources.Strings;
 using FluentAvalonia.UI.Controls;
 using Avalonia.Controls;
 using BD.WTTS.UI.Views.Controls;
+using System.Runtime.Devices;
+using BD.WTTS.Helpers;
 
 namespace BD.WTTS.UI.Views.Pages;
 
@@ -11,7 +13,8 @@ public partial class GameAccountPage : PageBase<GameAccountPageViewModel>
     public GameAccountPage()
     {
         InitializeComponent();
-        DataContext ??= new GameAccountPageViewModel();
+        this.SetViewModel<GameAccountPageViewModel>(true);
+        //DataContext ??= new GameAccountPageViewModel();
 
         //this.WhenActivated(disposable =>
         //{
@@ -46,6 +49,11 @@ public partial class GameAccountPage : PageBase<GameAccountPageViewModel>
             if (item is PlatformAccount platform && !File.Exists(platform.ExePath))
             {
                 var model = new PlatformSettingsPageViewModel(platform);
+
+                TracepointHelper.TrackEvent("GameAccountPlatformLoad", new Dictionary<string, string> {
+                    { "Name", platform.Platform.ToString() },
+                });
+
                 if (!await IWindowManager.Instance.ShowTaskDialogAsync(model, AppResources.Title_SetUp_.Format(platform.FullName),
                     subHeader: AppResources.SubHeader_FirstNeedToSetPlatformPath_.Format(platform.FullName),
                     pageContent: new PlatformSettingsPage(),

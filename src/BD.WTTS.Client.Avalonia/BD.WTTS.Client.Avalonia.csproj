@@ -1,12 +1,18 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<RootNamespace>BD.WTTS</RootNamespace>
 		<DefineConstants>AVALONIA;$(DefineConstants)</DefineConstants>
+		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+		<AvaloniaAccessUnstablePrivateApis>true</AvaloniaAccessUnstablePrivateApis>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<AvaloniaResource Include="UI\Assets\**\*" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="UI\Assets\Fonts\HarmonyOS_Sans_SC_Regular.ttf" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -67,17 +73,16 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="BD.Common.XmlnsDefinition.Avalonia">
-			<Aliases>BD_Common_XmlnsDefinition_Avalonia</Aliases>
-		</PackageReference>
 		<PackageReference Include="BD.Common" />
 		<PackageReference Include="BD.Common.Primitives" />
 		<PackageReference Include="BD.Common.Essentials" />
 		<PackageReference Include="Avalonia" />
 		<PackageReference Include="Avalonia.ReactiveUI" />
 		<PackageReference Include="Avalonia.Controls.DataGrid" />
+		<PackageReference Include="Avalonia.Controls.ItemsRepeater" />
 		<PackageReference Include="Avalonia.Xaml.Behaviors" />
-		<!--<PackageReference Include="Avalonia.AvaloniaEdit" />-->
+		<PackageReference Include="Avalonia.AvaloniaEdit" />
+		<PackageReference Include="AvaloniaEdit.TextMate" />
 		<!--<PackageReference Include="Markdown.Avalonia" />-->
 		<PackageReference Include="FluentAvaloniaUI" />
 		<PackageReference Include="LiveChartsCore.SkiaSharpView.Avalonia" />
@@ -122,7 +127,12 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Folder Include="UI\Assets\Icons\" />
+	  <Compile Update="UI\Views\Controls\Widgets\CarouselItems.cs">
+	    <DependentUpon>%(Filename)</DependentUpon>
+	  </Compile>
+	  <Compile Update="UI\Views\Pages\PluginStorePage.axaml.cs">
+	    <DependentUpon>PluginStorePage.axaml</DependentUpon>
+	  </Compile>
 	</ItemGroup>
 
 	<Import Project="..\TFM_NETX_WITH_DESKTOP.props" />

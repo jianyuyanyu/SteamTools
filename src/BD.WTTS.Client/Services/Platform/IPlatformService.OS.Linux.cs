@@ -3,55 +3,6 @@ namespace BD.WTTS.Services;
 
 partial interface IPlatformService
 {
-    #region LinuxEtcIssue
-
-#if LINUX
-
-    private const string LinuxFilePath_EtcIssue = "/etc/issue";
-    private const string Deepin = "Deepin";
-    private const string Ubuntu = "Ubuntu";
-
-    protected static readonly Lazy<string?> _LinuxEtcIssue = new(() =>
-    {
-        if (File.Exists(LinuxFilePath_EtcIssue))
-            return File.ReadAllText(LinuxFilePath_EtcIssue).TrimEnd(" \\n \\l\n\n").Trim();
-        return null;
-    });
-
-#endif
-
-    /// <summary>
-    /// 获取当前 Linux 系统发行版名称
-    /// </summary>
-    string? GetLinuxEtcIssue() =>
-#if LINUX
-        _LinuxEtcIssue.Value;
-#else
-        null;
-#endif
-
-    /// <summary>
-    /// 获取当前 Linux 系统发行版是否为 深度操作系统（deepin）
-    /// </summary>
-    bool IsDeepin() =>
-#if LINUX
-        GetLinuxEtcIssue()?.Contains(Deepin, StringComparison.OrdinalIgnoreCase) ?? false;
-#else
-        false;
-#endif
-
-    /// <summary>
-    /// 获取当前 Linux 系统发行版是否为 Ubuntu
-    /// </summary>
-    bool IsUbuntu() =>
-#if LINUX
-        GetLinuxEtcIssue()?.Contains(Ubuntu, StringComparison.OrdinalIgnoreCase) ?? false;
-#else
-        false;
-#endif
-
-    #endregion
-
     #region SystemUserPassword
 
 #if LINUX

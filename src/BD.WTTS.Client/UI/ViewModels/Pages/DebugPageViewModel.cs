@@ -1,6 +1,4 @@
 // ReSharper disable once CheckNamespace
-using BD.Common.Columns;
-using Google.Protobuf.WellKnownTypes;
 
 namespace BD.WTTS.UI.ViewModels;
 
@@ -23,8 +21,6 @@ public sealed partial class DebugPageViewModel : TabItemViewModel
         get => _DebugString;
         set => this.RaiseAndSetIfChanged(ref _DebugString, value);
     }
-
-    string? phonenumber;
 
     sealed class D : Repository<Common.Entities.KeyValuePair, string>
     {
@@ -86,6 +82,18 @@ public sealed partial class DebugPageViewModel : TabItemViewModel
                     DebugString = ex.ToString();
                 }
                 break;
+            case "updatetray":
+
+                break;
+            case "gc":
+                GC.Collect();
+                break;
+            case "refreshnews":
+#if DEBUG
+                NoticeService.Current.ClrearLastLookNoticeDateTime();
+#endif
+                await NoticeService.Current.GetNewsAsync();
+                break;
             case "login":
                 if (cmds.Length > 1)
                 {
@@ -104,7 +112,7 @@ public sealed partial class DebugPageViewModel : TabItemViewModel
                     // catch (Exception ex)
                     // {
                     // }
-
+                    string phonenumber = cmds[0];
                     if (phonenumber == null) phonenumber = "180" + Random2.GenerateRandomNum(8);
                     if (cmds[1] == "sms")
                     {

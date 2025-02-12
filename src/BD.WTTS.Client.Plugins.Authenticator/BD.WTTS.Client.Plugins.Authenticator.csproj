@@ -4,6 +4,7 @@
 		<RootNamespace>BD.WTTS</RootNamespace>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<DefineConstants>WTTS_PLUGIN;WTTS_PLUGIN_AUTHENTICATOR;$(DefineConstants)</DefineConstants>
+		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -62,10 +63,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<!--<PackageReference Include="Avalonia" />
-		<PackageReference Include="BD.Common.XmlnsDefinition.Avalonia">
-			<Aliases>BD_Common_XmlnsDefinition_Avalonia</Aliases>
-		</PackageReference>-->
 		<PackageReference Include="ReactiveUI.Fody" />
 	</ItemGroup>
 
@@ -80,10 +77,17 @@
 	</ItemGroup>
 
 	<ItemGroup>
+	  <AvaloniaResource Include="UI\Assets\market.ico" />
+	</ItemGroup>
+
+	<ItemGroup>
 	  <Compile Update="Properties\Resources.Designer.cs">
 	    <DesignTime>True</DesignTime>
 	    <AutoGen>True</AutoGen>
 	    <DependentUpon>Resources.resx</DependentUpon>
+	  </Compile>
+	  <Compile Update="UI\Views\Pages\JoinSteamAuthenticatorPage.axaml.cs">
+	    <DependentUpon>JoinSteamAuthenticatorPage.axaml</DependentUpon>
 	  </Compile>
 	</ItemGroup>
 
@@ -92,6 +96,10 @@
 	    <Generator>ResXFileCodeGenerator</Generator>
 	    <LastGenOutput>Resources.Designer.cs</LastGenOutput>
 	  </EmbeddedResource>
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="Services\" />
 	</ItemGroup>
 
 	<!--<Import Project="..\TFM_NETX_WITH_ALL.props" />-->

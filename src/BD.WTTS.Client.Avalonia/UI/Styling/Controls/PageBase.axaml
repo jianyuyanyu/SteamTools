@@ -2,7 +2,8 @@
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:spp="https://steampp.net/ui"
-    xmlns:ui="using:FluentAvalonia.UI.Controls">
+    xmlns:ui="using:FluentAvalonia.UI.Controls"
+    x:CompileBindings="True">
 
     <Design.PreviewWith>
         <Border
@@ -96,7 +97,7 @@
     </Design.PreviewWith>
 
     <Styles.Resources>
-        <Thickness x:Key="AppPageMargin">20 20 20 0</Thickness>
+        <Thickness x:Key="AppPageMargin">20,10,20,20</Thickness>
     </Styles.Resources>
 
     <Style Selector="spp|PageBase">
@@ -156,6 +157,7 @@
                                     <TextBlock
                                         Name="ControlNameTextBlock"
                                         FontSize="36"
+                                        MaxLines="2"
                                         Text="{TemplateBinding Title}"
                                         Theme="{StaticResource TitleTextBlockStyle}">
                                         <TextBlock.Transitions>
@@ -173,6 +175,7 @@
                                         <TextBlock
                                             FontStyle="Italic"
                                             Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                                            MaxLines="2"
                                             Text="{TemplateBinding Subtitle}"
                                             Theme="{StaticResource CaptionTextBlockStyle}" />
                                     </Button>
@@ -181,6 +184,7 @@
                                         FontStyle="Italic"
                                         Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                         IsVisible="False"
+                                        MaxLines="4"
                                         Text="{Binding Path=Description, RelativeSource={RelativeSource TemplatedParent}}"
                                         Theme="{StaticResource CaptionTextBlockStyle}" />
                                 </StackPanel>
@@ -223,10 +227,10 @@
                         PanePlacement="Right">
                         <SplitView.Pane>
                             <Border
-                                Margin="2,0,0,0"
                                 Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
-                                BoxShadow="0 4 16 0 #66000000"
-                                CornerRadius="4 0 0 4">
+                                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6 0 0 6">
                                 <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                                     <ScrollViewer.GestureRecognizers>
                                         <ScrollGestureRecognizer CanHorizontallyScroll="True" CanVerticallyScroll="True" />
@@ -243,7 +247,7 @@
                             <ScrollViewer.GestureRecognizers>
                                 <ScrollGestureRecognizer CanHorizontallyScroll="True" CanVerticallyScroll="True" />
                             </ScrollViewer.GestureRecognizers>
-                            <DockPanel Margin="0,0,0,20">
+                            <DockPanel>
                                 <TextBlock
                                     Margin="0,0,0,8"
                                     DockPanel.Dock="Top"
@@ -267,6 +271,11 @@
                 </DockPanel>
             </ControlTemplate>
         </Setter>
+    </Style>
+
+    <Style Selector="spp|PageBase:namespace /template/ Panel#OptionsRegion Button">
+        <Setter Property="MaxWidth" Value="200" />
+        <Setter Property="TextBlock.TextWrapping" Value="Wrap" />
     </Style>
 
     <Style Selector="spp|PageBase:namespace /template/ Button#NamespaceText">
@@ -304,7 +313,7 @@
             <Setter Property="Grid.Row" Value="2" />
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="HorizontalAlignment" Value="Center" />
-            <Setter Property="Margin" Value="0 12" />
+            <Setter Property="Margin" Value="0 12 0 0" />
         </Style>
 
         <Style Selector="^ /template/ Panel#PageDetails">

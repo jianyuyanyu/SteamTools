@@ -1,7 +1,8 @@
 <ResourceDictionary
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:ui="using:FluentAvalonia.UI.Controls">
+    xmlns:ui="using:FluentAvalonia.UI.Controls"
+    x:CompileBindings="True">
     <Design.PreviewWith>
         <Border
             Width="700"
@@ -37,18 +38,18 @@
         <Setter Property="MinHeight" Value="{DynamicResource SettingsExpanderItemMinHeight}" />
         <Setter Property="Template">
             <ControlTemplate>
-                <ui:FABorder
+                <Border
                     Name="Root"
                     Padding="{TemplateBinding Padding}"
                     Background="{TemplateBinding Background}"
                     BorderBrush="{TemplateBinding BorderBrush}"
                     BorderThickness="{TemplateBinding BorderThickness}">
-                    <ui:FABorder.Transitions>
+                    <Border.Transitions>
                         <Transitions>
                             <BrushTransition Property="Background" Duration="00:00:00.083" />
                             <BrushTransition Property="BorderBrush" Duration="00:00:00.083" />
                         </Transitions>
-                    </ui:FABorder.Transitions>
+                    </Border.Transitions>
 
                     <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="*,Auto">
                         <Viewbox
@@ -101,7 +102,7 @@
                             <ContentPresenter Name="ExpandChevronActionIconContainer" Content="{Binding TemplateSettings.ActionIcon, RelativeSource={RelativeSource TemplatedParent}}" />
                         </Viewbox>
                     </Grid>
-                </ui:FABorder>
+                </Border>
             </ControlTemplate>
         </Setter>
 
@@ -109,7 +110,7 @@
             <Setter Property="IsVisible" Value="False" />
         </Style>
 
-        <Style Selector="^:nth-last-child(1) /template/ ui|FABorder#Root">
+        <Style Selector="^:nth-last-child(1) /template/ Border#Root">
             <Setter Property="CornerRadius" Value="{Binding Source={StaticResource ControlCornerRadius}, Converter={StaticResource BottomCornerRadiusFilterConverter}}" />
         </Style>
 
@@ -146,16 +147,16 @@
         </Style>
         <Style Selector="^:iconPlaceholder">
             <Style Selector="^ /template/ StackPanel#HeaderRegion">
-                <Setter Property="Margin" Value="{DynamicResource SettingsExpanderItemContentMargin}" />
+                <Setter Property="Margin" Value="0" />
             </Style>
         </Style>
 
         <Style Selector="^:allowClick">
-            <Style Selector="^:pointerover /template/ ui|FABorder#Root">
+            <Style Selector="^:pointerover /template/ Border#Root">
                 <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
                 <Setter Property="BorderBrush" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
             </Style>
-            <Style Selector="^:pressed /template/ ui|FABorder#Root">
+            <Style Selector="^:pressed /template/ Border#Root">
                 <Setter Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
                 <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
                 <Setter Property="TextElement.Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
@@ -163,7 +164,7 @@
         </Style>
 
         <Style Selector="^:disabled">
-            <Style Selector="^ /template/ ui|FABorder#Root">
+            <Style Selector="^ /template/ Border#Root">
                 <Setter Property="Background" Value="{DynamicResource ControlFillColorDisabledBrush}" />
                 <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
                 <Setter Property="TextElement.Foreground" Value="{DynamicResource TextFillColorDisabledBrush}" />

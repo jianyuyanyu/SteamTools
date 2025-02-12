@@ -8,7 +8,7 @@
 
     <Design.PreviewWith>
         <Border Padding="40">
-            <StackPanel Spacing="10">
+            <StackPanel MaxWidth="500" Spacing="10">
                 <spp:Snackbar
                     Title="Title1"
                     IsClosable="True"
@@ -20,7 +20,7 @@
                     IsClosable="False"
                     IsIconVisible="True"
                     IsOpen="True"
-                    Message="Message" />
+                    Message="MessageMessageMessageMessageMessageMessageMessageMessage" />
                 <spp:Snackbar
                     Title="Title"
                     IsClosable="True"
@@ -38,7 +38,7 @@
                 <spp:Snackbar
                     Title="Title"
                     IsOpen="True"
-                    Message="Message"
+                    Message="MessageMessageMessageMessageMessageMessageMessageMessage"
                     Severity="Warning" />
                 <spp:Snackbar
                     Title="Title"
@@ -95,7 +95,7 @@
             <Setter Property="Template">
                 <ControlTemplate>
                     <LayoutTransformControl Name="PART_LayoutTransformControl" UseRenderTransform="True">
-                        <ui:FABorder
+                        <Border
                             Name="ContentRoot"
                             VerticalAlignment="Top"
                             BorderBrush="{DynamicResource InfoBarBorderBrush}"
@@ -205,13 +205,13 @@
                                     </Button>
                                 </Grid>
                             </Panel>
-                        </ui:FABorder>
+                        </Border>
                     </LayoutTransformControl>
                 </ControlTemplate>
             </Setter>
 
             <Style Selector="^:informational">
-                <Style Selector="^ /template/ ui|FABorder#ContentRoot">
+                <Style Selector="^ /template/ Border#ContentRoot">
                     <!--<Setter Property="Background" Value="{DynamicResource InfoBarInformationalSeverityBackgroundBrush}" />-->
                     <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorBaseBrush}" />
                 </Style>
@@ -226,7 +226,7 @@
             </Style>
 
             <Style Selector="^:error">
-                <Style Selector="^ /template/ ui|FABorder#ContentRoot">
+                <Style Selector="^ /template/ Border#ContentRoot">
                     <Setter Property="Background" Value="{DynamicResource InfoBarErrorSeverityBackgroundBrush}" />
                 </Style>
                 <Style Selector="^ /template/ Ellipse#IconBackground">
@@ -241,7 +241,7 @@
             </Style>
 
             <Style Selector="^:warning">
-                <Style Selector="^ /template/ ui|FABorder#ContentRoot">
+                <Style Selector="^ /template/ Border#ContentRoot">
                     <Setter Property="Background" Value="{DynamicResource InfoBarWarningSeverityBackgroundBrush}" />
                 </Style>
                 <Style Selector="^ /template/ Ellipse#IconBackground">
@@ -255,7 +255,7 @@
             </Style>
 
             <Style Selector="^:success">
-                <Style Selector="^ /template/ ui|FABorder#ContentRoot">
+                <Style Selector="^ /template/ Border#ContentRoot">
                     <Setter Property="Background" Value="{DynamicResource InfoBarSuccessSeverityBackgroundBrush}" />
                 </Style>
                 <Style Selector="^ /template/ Ellipse#IconBackground">
@@ -294,7 +294,7 @@
             </Style>
 
             <!--  Visible  -->
-            <Style Selector="^:hidden /template/ ui|FABorder#ContentRoot">
+            <Style Selector="^:hidden /template/ Border#ContentRoot">
                 <Setter Property="IsVisible" Value="False" />
             </Style>
 

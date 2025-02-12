@@ -93,6 +93,9 @@ public interface IPCSubProcessService : IDisposable
         var nativeLibraryPath = Environment.GetEnvironmentVariable(EnvKey_NativeLibraryPath);
         if (!string.IsNullOrWhiteSpace(nativeLibraryPath))
         {
+            var nativeLibraryPaths = nativeLibraryPath.Split(';',
+                StringSplitOptions.RemoveEmptyEntries);
+
             // 监听当前应用程序域的程序集加载
             AppDomain.CurrentDomain.AssemblyLoad += (_, args)
                 => CurrentDomain_AssemblyLoad(args.LoadedAssembly);
@@ -119,13 +122,34 @@ public interface IPCSubProcessService : IDisposable
                             return libraryName;
                         }
                         var libraryFileName = GetLibraryFileName(libraryName);
-                        var libraryPath = Path.Combine(nativeLibraryPath, libraryFileName);
-                        if (File.Exists(libraryPath) &&
-                            NativeLibrary.TryLoad(libraryPath, out var handle))
+                        string libraryPath = libraryName;
+                        try
                         {
-                            return handle;
+                            foreach (var nativeLibraryPath in nativeLibraryPaths)
+                            {
+                                libraryPath = Path.Combine(nativeLibraryPath, libraryFileName);
+                                if (File.Exists(libraryPath) &&
+                                    NativeLibrary.TryLoad(libraryPath, out var handle))
+                                {
+                                    return handle;
+                                }
+                                else if (!OperatingSystem.IsWindows() && !libraryFileName.StartsWith("lib", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    libraryFileName = $"lib{libraryFileName}";
+                                    libraryPath = Path.Combine(nativeLibraryPath, libraryFileName);
+                                    if (File.Exists(libraryPath) &&
+                                        NativeLibrary.TryLoad(libraryPath, out handle))
+                                    {
+                                        return handle;
+                                    }
+                                }
+                            }
+                            return NativeLibrary.Load(libraryName, assembly, searchPath);
                         }
-                        return NativeLibrary.Load(libraryName, assembly, searchPath);
+                        catch (Exception ex)
+                        {
+                            throw new FileNotFoundException(null, libraryPath, ex);
+                        }
                     }
                     NativeLibrary.SetDllImportResolver(loadedAssembly, Delegate);
                 }
@@ -287,10 +311,29 @@ sealed class IPCSubProcessFileSystem : IOPath.FileSystemBase
         config.LoggingRules.Add(new LoggingRule("*", minLevel, target));
     }
 
+    public static string GetLogDirPath(string? moduleName = null, string? cacheDirectory = null)
+    {
+        cacheDirectory ??= IOPath.CacheDirectory;
+
+        string logDirPath;
+        if (moduleName == null)
+        {
+            logDirPath = Path.Combine(cacheDirectory, LogDirName);
+        }
+        else
+        {
+            var dirName = GetDirectoryName(moduleName);
+            logDirPath = Path.Combine(cacheDirectory, LogDirName, dirName);
+        }
+
+        IOPath.DirCreateByNotExists(logDirPath);
+        return logDirPath;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void InitLog(
         ref string? logDirPath,
-        string? mainProcessModuleName = null,
+        string? moduleName = null,
         string? alias = null,
         string? cacheDirectory = null
 #if STARTUP_WATCH_TRACE || DEBUG
@@ -311,16 +354,8 @@ sealed class IPCSubProcessFileSystem : IOPath.FileSystemBase
 
         cacheDirectory ??= IOPath.CacheDirectory;
 
-        if (mainProcessModuleName == null)
-        {
-            logDirPath = Path.Combine(cacheDirectory, LogDirName);
-        }
-        else
-        {
-            var dirName = GetDirectoryName(mainProcessModuleName);
-            logDirPath = Path.Combine(cacheDirectory, LogDirName, dirName);
-        }
-        IOPath.DirCreateByNotExists(logDirPath);
+        logDirPath = GetLogDirPath(moduleName, cacheDirectory);
+
 #if (STARTUP_WATCH_TRACE || DEBUG) && !LIB_CLIENT_IPC
         if (watchTrace) Startup.WatchTrace.Record("InitLog.IOPath");
 #endif

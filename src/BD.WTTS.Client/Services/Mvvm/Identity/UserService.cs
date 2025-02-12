@@ -6,9 +6,9 @@ namespace BD.WTTS.Services;
 
 public sealed class UserService : ReactiveObject
 {
-    static UserService? mCurrent;
+    static readonly Lazy<UserService> mCurrent = new(() => new(), LazyThreadSafetyMode.ExecutionAndPublication);
 
-    public static UserService Current => mCurrent ?? new();
+    public static UserService Current => mCurrent.Value;
 
     readonly IUserManager userManager = IUserManager.Instance;
     readonly IMicroServiceClient csc = IMicroServiceClient.Instance;
@@ -45,8 +45,16 @@ public sealed class UserService : ReactiveObject
     {
         var cUser = await userManager.GetCurrentUserAsync();
         if (cUser.HasValue()) return;
+
+        //if (Random2.Next(2) == 1)
+        //{
         var vm = new LoginOrRegisterWindowViewModel();
         await windowManager.ShowTaskDialogAsync(vm, vm.Title, isOkButton: false);
+        //}
+        //else
+        //{
+        //    INavigationService.Instance.Navigate(typeof(LoginOrRegisterWindowViewModel), NavigationTransitionEffect.DrillIn);
+        //}
     }
 
     public void NavigateUserCenterPage()
@@ -74,7 +82,7 @@ public sealed class UserService : ReactiveObject
         await RefreshUserAsync();
         if (message != null)
         {
-            Toast.Show(message);
+            Toast.Show(ToastIcon.Error, message);
         }
     }
 
@@ -107,11 +115,11 @@ public sealed class UserService : ReactiveObject
                 User.Level = state.Content!.Level;
                 //User.EngineOil = state.Content!.Strength;
                 User.IsSignIn = true;
-                Toast.Show(AppResources.User_SignIn_Ok);
+                Toast.Show(ToastIcon.Success, AppResources.User_SignIn_Ok);
             }
             else
             {
-                Toast.Show(state.Message);
+                Toast.Show(ToastIcon.Error, state.Message);
             }
         }
     }
@@ -130,8 +138,6 @@ public sealed class UserService : ReactiveObject
 
     private UserService()
     {
-        mCurrent = this;
-
         this.WhenAnyValue(x => x.User)
               .Subscribe(_ => this.RaisePropertyChanged(nameof(AvatarPath)));
 
@@ -141,7 +147,8 @@ public sealed class UserService : ReactiveObject
             CurrentSteamUser = null;
             AvatarPath = null;
         };
-
+        OpenAuthWattGameCommand = ReactiveCommand.CreateFromTask<string>(async url => await OpenAuthUrl(url, FastLoginWebChannel.WattGame));
+        OpenAuthOfficialCommand = ReactiveCommand.CreateFromTask<string>(async url => await OpenAuthUrl(url, FastLoginWebChannel.OfficialWebsite));
         Task.Run(Initialize).ForgetAndDispose();
     }
 
@@ -188,6 +195,51 @@ public sealed class UserService : ReactiveObject
     {
         var user = await userManager.GetCurrentUserInfoAsync();
         await RefreshUserAsync(user, refreshCurrentUser);
+    }
+
+    public async Task RefreshShopTokenAsync(bool refreshToken = true)
+    {
+        var currentUser = await userManager.GetCurrentUserAsync();
+
+        if (refreshToken && currentUser != null)
+        {
+            var token = await csc.Shop.GetShopUserTokenAsync();
+            if (token.IsSuccess)
+            {
+                currentUser.ShopAuthToken = token.Content;
+                await userManager.SetCurrentUserAsync(currentUser);
+            }
+        }
+    }
+
+    public async void RefreshShopToken(bool refreshToken = true)
+    {
+        await RefreshShopTokenAsync(refreshToken);
+    }
+
+    /// <summary>
+    /// 带登录状态跳转 Url
+    /// </summary>
+    /// <param name="url">跳转地址</param>
+    /// <returns></returns>
+    public async Task OpenAuthUrl(string url)
+    {
+
+        await OpenAuthUrl(url, url.StartsWith(Constants.Urls.WattGame, StringComparison.OrdinalIgnoreCase) ? FastLoginWebChannel.WattGame : FastLoginWebChannel.OfficialWebsite);
+        //if (url.StartsWith(Constants.Urls.WattGame, StringComparison.OrdinalIgnoreCase))
+        //{
+        //    return;
+        //}
+
+        //var token = await userManager.GetAuthTokenAsync();
+        //if (token == null)
+        //{
+        //    Browser2.Open(url.ToString());
+        //}
+        //else
+        //{
+        //    Browser2.Open(string.Format(Constants.Urls.OfficialWebsite_Fast_Login_, token.AccessToken, HttpUtility.UrlEncode(token.ExpiresIn.ToString("R")), HttpUtility.UrlEncode(url)));
+        //}
     }
 
     public async Task RefreshUserAvatarAsync()
@@ -255,6 +307,44 @@ public sealed class UserService : ReactiveObject
         }
 
         AvatarPath = null;
+    }
+
+    //public async Task LoginShop()
+    //{
+    //    var temp = await csc.Shop.GetShopUserTokenAsync();
+    //}
+
+    public ICommand OpenAuthWattGameCommand { get; }
+
+    public ICommand OpenAuthOfficialCommand { get; }
+
+    /// <summary>
+    /// 带登录状态跳转 Url
+    /// </summary>
+    /// <param name="url">跳转地址</param>
+    /// <param name="channel">Web 跳转渠道</param>
+    public async Task OpenAuthUrl(string url, FastLoginWebChannel channel = FastLoginWebChannel.OfficialWebsite)
+    {
+        switch (channel)
+        {
+
+            case FastLoginWebChannel.OfficialWebsite:
+                var token = await userManager.GetAuthTokenAsync();
+                if (token != null)
+                {
+                    await Browser2.OpenAsync(string.Format(Constants.Urls.OfficialWebsite_Fast_Login_, token.AccessToken, HttpUtility.UrlEncode(token.ExpiresIn.ToString("R")), HttpUtility.UrlEncode(url)));
+                }
+                return;
+            case FastLoginWebChannel.WattGame:
+                var shopToken = await userManager.GetShopAuthTokenAsync();
+                if (shopToken != null)
+                {
+                    var cookieMaxAge = (shopToken.ExpiresIn - DateTimeOffset.Now).TotalSeconds;
+                    await Browser2.OpenAsync(string.Format(Constants.Urls.WattGame_Fast_Login_, shopToken.AccessToken, HttpUtility.UrlEncode(cookieMaxAge.ToString()), HttpUtility.UrlEncode(url)));
+                }
+                return;
+        }
+        await Browser2.OpenAsync(url.ToString());
     }
 
     /// <summary>

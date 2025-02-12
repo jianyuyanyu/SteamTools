@@ -13,8 +13,6 @@
     <Panel>
         <lvc:CartesianChart
             x:Name="Chart"
-            MinWidth="400"
-            MinHeight="160"
             HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch"
             Background="Transparent" />
@@ -24,9 +22,7 @@
                 Margin="0,5"
                 HorizontalAlignment="Center"
                 Foreground="DodgerBlue"
-                Text="{ReflectionBinding Path=Res.UploadFlow,
-                                         Mode=OneWay,
-                                         Source={x:Static s:ResourceService.Current}}"
+                Text="{Binding Path=Res.UploadFlow, Mode=OneWay, Source={x:Static s:ResourceService.Current}}"
                 Theme="{StaticResource BodyStrongTextBlockStyle}" />
             <TextBlock
                 x:Name="textBlockRead"
@@ -39,9 +35,7 @@
                 Margin="0,5"
                 HorizontalAlignment="Center"
                 Foreground="IndianRed"
-                Text="{ReflectionBinding Path=Res.DownloadFlow,
-                                         Mode=OneWay,
-                                         Source={x:Static s:ResourceService.Current}}"
+                Text="{Binding Path=Res.DownloadFlow, Mode=OneWay, Source={x:Static s:ResourceService.Current}}"
                 Theme="{StaticResource BodyStrongTextBlockStyle}" />
             <TextBlock
                 x:Name="textBlockWrite"

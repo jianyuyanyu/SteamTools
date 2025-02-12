@@ -40,6 +40,7 @@ static class MSIXHelper
             // https://learn.microsoft.com/en-us/windows/uwp/app-resources/makepri-exe-command-options
 
             var xmlPath = @$"{rootPublicPath}\priconfig.xml";
+            var mnPath = @$"{rootPublicPath}\AppXManifest.xml";
 
             IOPath.FileIfExistsItDelete(xmlPath);
 
@@ -50,12 +51,17 @@ static class MSIXHelper
                 UseShellExecute = false,
                 Arguments =
 $"""
-createconfig /cf "{xmlPath}" /dq lang-en-US /o /pv 10.0.0
+createconfig /cf "{xmlPath}" /dq zh-CN /o /pv 10.0.0
 """,
                 WorkingDirectory = rootPublicPath,
             };
-            DotNetCLIHelper.StartProcessAndWaitForExit(psi);
-            var prPath = $@"{ProjectUtils.ProjPath}\build\windows\makepri";
+            ProcessHelper.StartAndWaitForExit(psi);
+
+            var prixml = File.ReadAllText(xmlPath);
+            prixml = prixml.Replace("<packaging>\r\n\t\t<autoResourcePackage qualifier=\"Language\"/>\r\n\t\t<autoResourcePackage qualifier=\"Scale\"/>\r\n\t\t<autoResourcePackage qualifier=\"DXFeatureLevel\"/>\r\n\t</packaging>", "");
+            File.WriteAllText(xmlPath, prixml);
+
+            var prPath = $@"{ProjectUtils.ProjPath}\res\windows\makepri";
             CopyDirectory(prPath, rootPublicPath, true);
             psi = new ProcessStartInfo
             {
@@ -63,11 +69,11 @@ createconfig /cf "{xmlPath}" /dq lang-en-US /o /pv 10.0.0
                 UseShellExecute = false,
                 Arguments =
 $"""
-new /cf "{xmlPath}" /pr "{prPath}"
+new /cf "{xmlPath}" /pr "{prPath}" /mn "{mnPath}"
 """,
                 WorkingDirectory = rootPublicPath,
             };
-            DotNetCLIHelper.StartProcessAndWaitForExit(psi);
+            ProcessHelper.StartAndWaitForExit(psi);
 
             IOPath.FileIfExistsItDelete(xmlPath);
         }
@@ -101,13 +107,14 @@ new /cf "{xmlPath}" /pr "{prPath}"
         }
 
         public static void Start(
+            string msixPath,
             string rootPublicPath,
             string version4,
             Architecture processorArchitecture)
         {
-            GenerateAppxManifestXml(rootPublicPath, version4, processorArchitecture);
+            //GenerateAppxManifestXml(rootPublicPath, version4, processorArchitecture);
 
-            var msixPath = $"{rootPublicPath}.msix";
+            //var msixPath = $"{rootPublicPath}.msixbundle";
             IOPath.FileIfExistsItDelete(msixPath);
 
             var psi = new ProcessStartInfo
@@ -118,9 +125,39 @@ new /cf "{xmlPath}" /pr "{prPath}"
 $"""
 pack /v /h SHA256 /d "{rootPublicPath}" /p "{msixPath}"
 """,
+                //$"""
+                //bundle /v /d "{rootPublicPath}" /p "{msixPath}"
+                //""",
             };
-            DotNetCLIHelper.StartProcessAndWaitForExit(psi);
+            ProcessHelper.StartAndWaitForExit(psi);
         }
+
+        public static void StartBundle(
+            string msixPath,
+            string dirPath,
+            string version4)
+        {
+            //GenerateBundleManifestXml(dirPath, version4);
+
+            IOPath.FileIfExistsItDelete(msixPath);
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = GetMakeAppxPath(),
+                UseShellExecute = false,
+                Arguments =
+$"""
+bundle /v /bv {version4} /d "{dirPath}" /p "{msixPath}"
+""",
+            };
+            ProcessHelper.StartAndWaitForExit(psi);
+        }
+
+        const string IdentityName = "4651ED44255E.47979655102CE";
+        const string Publisher = "CN=A90E406B-B2D3-4A23-B061-0FA1D65C4F66";
+        //const string Publisher = "CN=徐州繁星网络科技有限公司";
+        const string DisplayName = "Watt Toolkit";
+        const string PublisherDisplayName = "软妹币玩家";
 
         /// <summary>
         /// 生成位于根目录的 AppxManifest.xml
@@ -128,22 +165,25 @@ pack /v /h SHA256 /d "{rootPublicPath}" /p "{msixPath}"
         /// <param name="rootPublicPath"></param>
         /// <param name="version4"></param>
         /// <param name="processorArchitecture"></param>
-        static void GenerateAppxManifestXml(
+        public static void GenerateAppxManifestXml(
             string rootPublicPath,
             string version4,
             Architecture processorArchitecture)
         {
             // https://learn.microsoft.com/zh-cn/windows/msix/desktop/desktop-to-uwp-manual-conversion
 
+            // 处理 URI 激活
+            // https://learn.microsoft.com/zh-cn/windows/uwp/launch-resume/handle-uri-activation
+
             var xmlString =
 $"""
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <Package IgnorableNamespaces="uap rescap desktop desktop2 build" xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities" xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10" xmlns:desktop2="http://schemas.microsoft.com/appx/manifest/desktop/windows10/2" xmlns:build="http://schemas.microsoft.com/developer/appx/2015/build">
-  <Identity Name="4651ED44255E.47979655102CE" Publisher="CN=A90E406B-B2D3-4A23-B061-0FA1D65C4F66" 
+  <Identity Name="{IdentityName}" Publisher="{Publisher}" 
 Version="{version4}" ProcessorArchitecture="{processorArchitecture.ToString().ToLowerInvariant()}"/>
   <Properties>
-    <DisplayName>Watt Toolkit</DisplayName>
-    <PublisherDisplayName>软妹币玩家</PublisherDisplayName>
+    <DisplayName>{DisplayName}</DisplayName>
+    <PublisherDisplayName>{PublisherDisplayName}</PublisherDisplayName>
     <Logo>images\StoreLogo.png</Logo>
   </Properties>
   <Dependencies>
@@ -151,13 +191,13 @@ Version="{version4}" ProcessorArchitecture="{processorArchitecture.ToString().To
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0"/>
   </Dependencies>
   <Resources>
-    <Resource Language="ZH-CN"/>
+    <Resource Language="zh-CN"/>
     <Resource uap:Scale="200"/>
   </Resources>
   <Applications>
     <Application Id="App" Executable="Steam++.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements DisplayName="Watt Toolkit" Description="「Watt Toolkit」是一个开源跨平台的多功能游戏工具箱，此工具的大部分功能都是需要您下载安装 Steam 才能使用。" BackgroundColor="transparent" Square150x150Logo="images\Square150x150Logo.png" Square44x44Logo="images\Square44x44Logo.png">
-        <uap:DefaultTile Wide310x150Logo="images\Wide310x150Logo.png" Square71x71Logo="images\SmallTile.png" Square310x310Logo="images\LargeTile.png" ShortName="Steam++">
+        <uap:DefaultTile Wide310x150Logo="images\Wide310x150Logo.png" Square71x71Logo="images\SmallTile.png" Square310x310Logo="images\LargeTile.png" ShortName="{DisplayName}">
           <uap:ShowNameOnTiles>
             <uap:ShowOn Tile="square150x150Logo"/>
             <uap:ShowOn Tile="wide310x150Logo"/>
@@ -175,6 +215,12 @@ Version="{version4}" ProcessorArchitecture="{processorArchitecture.ToString().To
         <desktop:Extension Category="windows.startupTask" Executable="Steam++.exe" EntryPoint="Windows.FullTrustApplication">
           <desktop:StartupTask TaskId="BootAutoStartTask" Enabled="true" DisplayName="Steam++ System Boot Run"/>
         </desktop:Extension>
+        <uap:Extension Category="windows.protocol">
+            <uap:Protocol Name="spp">
+                <uap:Logo>Images\Square44x44Logo.png</uap:Logo>
+                <uap:DisplayName>Steam++ URI Scheme</uap:DisplayName>
+            </uap:Protocol>
+        </uap:Extension>
       </Extensions>
     </Application>
   </Applications>
@@ -197,6 +243,29 @@ Version="{version4}" ProcessorArchitecture="{processorArchitecture.ToString().To
             xmlDoc.LoadXml(xmlString);
             var xmlStringMini = xmlDoc.InnerXml;
             var xmlFilePath = Path.Combine(rootPublicPath, "AppxManifest.xml");
+            File.WriteAllText(xmlFilePath, xmlStringMini);
+        }
+
+        [Obsolete]
+        public static void GenerateBundleManifestXml(
+            string dirPath,
+            string version4)
+        {
+            const string fileName = "BundleManifest.xml";
+
+            // https://learn.microsoft.com/zh-cn/uwp/schemas/bundlemanifestschema/bundle-manifest
+
+            var xmlString =
+$"""
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<Bundle SchemaVersion="5.0" IgnorableNamespaces="b4 b5" xmlns="http://schemas.microsoft.com/appx/2013/bundle" xmlns:b4="http://schemas.microsoft.com/appx/2018/bundle" xmlns:b5="http://schemas.microsoft.com/appx/2019/bundle">
+	<Identity Name="{IdentityName}" Publisher="{Publisher}" Version="{version4}"/>
+</Bundle>
+""";
+            var xmlDoc = new XmlDocument();
+            xmlDoc.LoadXml(xmlString);
+            var xmlStringMini = xmlDoc.InnerXml;
+            var xmlFilePath = Path.Combine(dirPath, fileName);
             File.WriteAllText(xmlFilePath, xmlStringMini);
         }
 
@@ -262,44 +331,72 @@ Version="{version4}" ProcessorArchitecture="{processorArchitecture.ToString().To
 
         public const string pfxFilePath_MSStore_CodeSigning = @"C:\MSStore_CodeSigning.pfx";
         public const string pfxFilePath_BeyondDimension_CodeSigning = @"C:\BeyondDimension_CodeSigning.pfx";
+        public const string pfxFilePath_HSM_CodeSigning = "DBE4005A4E9371BB8621CD481CD124F8865621C9";
 
         public static void Start(
             bool force_sign,
             string fileName,
-            string? pfxFilePath = null)
+            string? pfxFilePath = null,
+            string? workingDirectory = null)
         {
-            pfxFilePath ??= pfxFilePath_BeyondDimension_CodeSigning;
-            var pwdTxtPath = $"{pfxFilePath}.txt";
+            if (pfxFilePath != pfxFilePath_MSStore_CodeSigning)
+                return;
 
-            if (!File.Exists(pwdTxtPath))
+            ProcessStartInfo psi;
+            switch (pfxFilePath)
             {
-                if (force_sign) throw new FileNotFoundException(null, pwdTxtPath);
-                return; // 文件不存在则跳过代码签名
-            }
-
-            var parentDirPath = Path.GetDirectoryName(pfxFilePath);
-            parentDirPath.ThrowIsNull();
-
-            var optionalEntropy = File.ReadAllBytes(Path.Combine(parentDirPath, "optionalEntropy.txt"));
-            optionalEntropy.ThrowIsNull();
-
-            var pwd = File.ReadAllBytes(pwdTxtPath);
-#pragma warning disable CA1416 // 验证平台兼容性
-            pwd = ProtectedData.Unprotect(pwd,
-                optionalEntropy,
-                DataProtectionScope.LocalMachine);
-#pragma warning restore CA1416 // 验证平台兼容性
-            var pwdS = Encoding.UTF8.GetString(pwd);
-            var psi = new ProcessStartInfo
-            {
-                FileName = GetSignToolPath(),
-                UseShellExecute = false,
-                Arguments =
+                case pfxFilePath_HSM_CodeSigning:
+                    {
+                        psi = new ProcessStartInfo
+                        {
+                            FileName = GetSignToolPath(),
+                            UseShellExecute = false,
+                            Arguments =
 $"""
-sign /a /fd SHA256 /f "{pfxFilePath}" /p "{pwdS}" /tr {timestamp_url} /td SHA256 {fileName}
+sign /fd SHA256 /sha1 {pfxFilePath_HSM_CodeSigning} /tr {timestamp_url} /td SHA256 {fileName}
 """,
-            };
-            DotNetCLIHelper.StartProcessAndWaitForExit(psi);
+                        };
+                    }
+                    break;
+                default:
+                    {
+                        pfxFilePath ??= pfxFilePath_BeyondDimension_CodeSigning;
+                        var pwdTxtPath = $"{pfxFilePath}.txt";
+
+                        if (!File.Exists(pwdTxtPath))
+                        {
+                            if (force_sign) throw new FileNotFoundException(null, pwdTxtPath);
+                            return; // 文件不存在则跳过代码签名
+                        }
+
+                        var parentDirPath = Path.GetDirectoryName(pfxFilePath);
+                        parentDirPath.ThrowIsNull();
+
+                        var optionalEntropy = File.ReadAllBytes(Path.Combine(parentDirPath, "optionalEntropy.txt"));
+                        optionalEntropy.ThrowIsNull();
+
+                        var pwd = File.ReadAllBytes(pwdTxtPath);
+#pragma warning disable CA1416 // 验证平台兼容性
+                        pwd = ProtectedData.Unprotect(pwd,
+                            optionalEntropy,
+                            DataProtectionScope.LocalMachine);
+#pragma warning restore CA1416 // 验证平台兼容性
+                        var pwdS = Encoding.UTF8.GetString(pwd);
+                        psi = new ProcessStartInfo
+                        {
+                            FileName = GetSignToolPath(),
+                            UseShellExecute = false,
+                            Arguments =
+           $"""
+            sign /a /fd SHA256 /f "{pfxFilePath}" /p "{pwdS}" /tr {timestamp_url} /td SHA256 {fileName}
+            """,
+                        };
+                    }
+                    break;
+            }
+            if (!string.IsNullOrWhiteSpace(workingDirectory))
+                psi.WorkingDirectory = workingDirectory;
+            ProcessHelper.StartAndWaitForExit(psi);
         }
     }
 

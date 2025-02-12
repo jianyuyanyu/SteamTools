@@ -21,7 +21,7 @@ public sealed class RequestCache : IEntity<string>
 
     [SQLiteNotNull]
     [Column("58943668")]
-    public byte[] Response { get; set; } = null!;
+    public string RelativePath { get; set; } = null!;
 
     [SQLiteNotNull]
     [Column("A2B49CB8")]

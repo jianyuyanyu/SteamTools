@@ -1,5 +1,6 @@
 // https://github.com/dotnetcore/FastGithub/blob/2.1.4/FastGithub.HttpServer/HttpReverseProxyMiddleware.cs
 
+using Microsoft.AspNetCore.Http;
 using Yarp.ReverseProxy.Forwarder;
 
 // ReSharper disable once CheckNamespace
@@ -38,6 +39,7 @@ sealed partial class HttpReverseProxyMiddleware
     public async Task InvokeAsync(HttpContext context, RequestDelegate next)
     {
         var url = context.Request.GetDisplayUrl();
+        //var url = context.Request.GetDisplayUrl().Remove(0, context.Request.Scheme.Length + 3);
 
         var isScriptInject = reverseProxyConfig.TryGetScriptConfig(url, out var scriptConfigs);
 
@@ -50,9 +52,31 @@ sealed partial class HttpReverseProxyMiddleware
             context.Response.Body = memoryStream;
         }
 
-        if (TryGetDomainConfig(url, out var domainConfig) == false)
+        if (TryGetDomainConfig(url.Remove(0, context.Request.Scheme.Length + 3), out var domainConfig) == false)
         {
-            await next(context);
+            if (reverseProxyConfig.Service.TwoLevelAgentEnable)
+            {
+                var httpClient = httpClientFactory.CreateHttpClient("GlobalProxy", defaultDomainConfig);
+                var destinationPrefix = GetDestinationPrefix(context.Request.Scheme, context.Request.Host, null);
+                var forwarderRequestConfig = new ForwarderRequestConfig()
+                {
+                    Version = context.Request.Protocol switch
+                    {
+                        var protocol when protocol.StartsWith("HTTP/2") => System.Net.HttpVersion.Version20,
+                        var protocol when protocol.StartsWith("HTTP/3") => System.Net.HttpVersion.Version30,
+                        _ => System.Net.HttpVersion.Version11,
+                    },
+                };
+                var error = await httpForwarder.SendAsync(context, destinationPrefix, httpClient, forwarderRequestConfig, HttpTransformer.Empty);
+                if (error != ForwarderError.None)
+                {
+                    await HandleErrorAsync(context, error);
+                }
+            }
+            else
+            {
+                await next(context);
+            }
             return;
         }
 
@@ -60,7 +84,7 @@ sealed partial class HttpReverseProxyMiddleware
             !reverseProxyConfig.Service.OnlyEnableProxyScript)
         {
             // 部分运营商将奇怪的域名解析到 127.0.0.1 再此排除这些不支持的代理域名
-            var ip = await reverseProxyConfig.DnsAnalysis.AnalysisDomainIpAsync(context.Request.Host.Value, IDnsAnalysisService.DNS_Dnspods).FirstOrDefaultAsync();
+            var ip = await reverseProxyConfig.DnsAnalysis.AnalysisDomainIpAsync(context.Request.Host.Value!, IDnsAnalysisService.DNS_Dnspods).FirstOrDefaultAsync();
             if (ip == null || IPAddress.IsLoopback(ip))
             {
                 context.Response.StatusCode = StatusCodes.Status500InternalServerError;
@@ -80,14 +104,37 @@ sealed partial class HttpReverseProxyMiddleware
                 return;
             }
 
-            var destinationPrefix = GetDestinationPrefix(context.Request.Scheme, context.Request.Host, domainConfig.Destination);
+            var destination = domainConfig.Destination;
+            if (domainConfig.Destination?.AbsoluteUri.Contains("@") == true)
+            {
+                var newUrl = domainConfig.Destination.AbsoluteUri.Replace("@domain", context.Request.Host.Host);
+                newUrl = newUrl.Replace("@uri", context.Request.RawUrl());
+                destination = new Uri(newUrl);
+            }
+
+            var destinationPrefix = GetDestinationPrefix(context.Request.Scheme, context.Request.Host, destination);
             var httpClient = httpClientFactory.CreateHttpClient(context.Request.Host.Host, domainConfig);
             if (!string.IsNullOrEmpty(domainConfig.UserAgent))
             {
                 context.Request.Headers.UserAgent = domainConfig.UserAgent.Replace("${origin}", context.Request.Headers.UserAgent, StringComparison.OrdinalIgnoreCase);
             }
 
-            var error = await httpForwarder.SendAsync(context, destinationPrefix, httpClient, ForwarderRequestConfig.Empty, HttpTransformer.Empty);
+            var forwarderRequestConfig = new ForwarderRequestConfig()
+            {
+                Version = context.Request.Protocol switch
+                {
+                    var protocol when protocol.StartsWith("HTTP/2") => System.Net.HttpVersion.Version20,
+                    var protocol when protocol.StartsWith("HTTP/3") => System.Net.HttpVersion.Version30,
+                    _ => System.Net.HttpVersion.Version11,
+                },
+            };
+
+            if (domainConfig.IsServerSideProxy)
+            {
+                SetWattHeaders(context, reverseProxyConfig.Service.ServerSideProxyToken);
+            }
+
+            var error = await httpForwarder.SendAsync(context, destinationPrefix, httpClient, forwarderRequestConfig, HttpTransformer.Empty);
 
             if (error != ForwarderError.None)
             {
@@ -135,7 +182,7 @@ sealed partial class HttpReverseProxyMiddleware
             return true;
         }
 
-        var host = new Uri(uri).Host;
+        var host = new UriBuilder(uri).Host;
         // 未配置的域名，但仍然被解析到本机 IP 的域名
         if (IsDomain(host))
         {
@@ -282,8 +329,8 @@ sealed partial class HttpReverseProxyMiddleware
                         //                        var html_start_string = encoding.GetString(html_start.Span);
                         //#endif
                         await bodyCoreWriter.WriteAsync(html_start);
-                        var script_xml_start = "<script type=\"text/javascript\" src=\"https://local.steampp.net/"u8.ToArray();
-                        var script_xml_end = "\"></script>"u8.ToArray();
+                        ReadOnlyMemory<byte> script_xml_start = "<script type=\"text/javascript\" src=\"https://local.steampp.net/"u8.ToArray();
+                        ReadOnlyMemory<byte> script_xml_end = "\"></script>"u8.ToArray();
                         foreach (var script in scripts)
                         {
                             await bodyCoreWriter.WriteAsync(script_xml_start);
@@ -386,6 +433,15 @@ sealed partial class HttpReverseProxyMiddleware
         encoding = null;
         //preambleLength = 0;
         return false;
+    }
+
+    static void SetWattHeaders(HttpContext context, string? token)
+    {
+        context.Request.Headers.TryAdd("X-Watt-Origin-Dest-Scheme", context.Request.Scheme);
+        context.Request.Headers.TryAdd("X-Watt-Origin-Dest-Host", context.Request.Host.ToString());
+        context.Request.Headers.TryAdd("X-Watt-Origin-Dest-PathAndQuery", context.Request.GetEncodedPathAndQuery());
+
+        context.Request.Headers.TryAdd("X-Watt-Token", token ?? string.Empty);
     }
 
     const int UTF8PreambleLength = 3;

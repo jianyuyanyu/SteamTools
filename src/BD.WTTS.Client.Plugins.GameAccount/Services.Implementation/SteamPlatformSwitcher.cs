@@ -11,60 +11,67 @@ public sealed class SteamPlatformSwitcher : IPlatformSwitcher
         this.swWebService = swWebService;
     }
 
-    public void SwapToAccount(IAccount? account, PlatformAccount platform)
+    public async ValueTask<bool> SwapToAccount(IAccount? account, PlatformAccount platform)
     {
-        if (account is SteamAccount steamAccount)
+        await KillPlatformProcess(platform);
+        var users = platform.Accounts?.Cast<SteamAccount>().Select(s => s.SteamUser).ToArray();
+        if (users.Any_Nullable())
         {
-            KillPlatformProcess(platform);
-            var users = platform.Accounts?.Cast<SteamAccount>().Select(s => s.SteamUser);
-            if (users.Any_Nullable())
+            if (account is SteamAccount steamAccount && !string.IsNullOrEmpty(steamAccount?.AccountName))
             {
-                if (!string.IsNullOrEmpty(account?.AccountName))
+                await steamService.SetSteamCurrentUserAsync(steamAccount.AccountName);
+                foreach (var user in users)
                 {
-                    steamService.SetCurrentUser(account.AccountName);
-                    foreach (var user in users)
+                    if (user.AccountName == steamAccount.AccountName)
                     {
-                        if (user.AccountName == account.AccountName)
-                        {
-                            user.MostRecent = true;
-                            user.RememberPassword = true;
-                            user.WantsOfflineMode = steamAccount.WantsOfflineMode;
-                            user.SkipOfflineModeWarning = steamAccount.SkipOfflineModeWarning;
+                        user.MostRecent = true;
+                        user.RememberPassword = true;
+                        user.WantsOfflineMode = steamAccount.WantsOfflineMode;
+                        user.SkipOfflineModeWarning = steamAccount.SkipOfflineModeWarning;
+
+                        if (steamAccount.PersonaState != PersonaState.Default)
                             ISteamService.Instance.SetPersonaState(steamAccount.SteamUser.SteamId32.ToString(), steamAccount.PersonaState);
-                        }
-                        else
-                        {
-                            user.MostRecent = false;
-                        }
                     }
-                }
-                else
-                {
-                    steamService.SetCurrentUser("");
-                    foreach (var user in users)
+                    else
                     {
                         user.MostRecent = false;
                     }
+
+                    var optional = SteamConnectService.Current.SteamUsers.Lookup(user.SteamId64);
+                    if (optional.HasValue)
+                    {
+                        optional.Value.MostRecent = user.MostRecent;
+                    }
                 }
-                steamService.UpdateLocalUserData(users);
             }
             else
             {
-                Toast.Show(ToastIcon.Error, "Steam 用户信息获取失败");
+                await ClearCurrentLoginUser(platform);
+                foreach (var user in users)
+                {
+                    user.MostRecent = false;
+                }
             }
-            RunPlatformProcess(platform, false);
+            steamService.UpdateLocalUserData(users);
         }
-    }
-
-    bool IPlatformSwitcher.ClearCurrentLoginUser(PlatformAccount platform)
-    {
-        steamService.SetCurrentUser("");
+        else
+        {
+            Toast.Show(ToastIcon.Error, Strings.Error_SteamGetUserInfo);
+        }
+        RunPlatformProcess(platform, false);
         return true;
     }
 
-    public bool KillPlatformProcess(PlatformAccount platform)
+    public async ValueTask<bool> ClearCurrentLoginUser(PlatformAccount platform)
     {
-        return steamService.TryKillSteamProcess();
+        await steamService.SetSteamCurrentUserAsync(string.Empty);
+        return true;
+    }
+
+    public async ValueTask<bool> KillPlatformProcess(PlatformAccount platform)
+    {
+        var r = await steamService.TryKillSteamProcess();
+        return r;
     }
 
     public bool RunPlatformProcess(PlatformAccount platform, bool isAdmin)
@@ -73,12 +80,13 @@ public sealed class SteamPlatformSwitcher : IPlatformSwitcher
         return true;
     }
 
-    public void NewUserLogin(PlatformAccount platform)
+    public async ValueTask NewUserLogin(PlatformAccount platform)
     {
-        SwapToAccount(null, platform);
+        await ClearCurrentLoginUser(platform);
+        await SwapToAccount(null, platform);
     }
 
-    public bool CurrnetUserAdd(string name, PlatformAccount platform) => false;
+    public ValueTask<bool> CurrnetUserAdd(string name, PlatformAccount platform) => ValueTask.FromResult(false);
 
     public string GetCurrentAccountId(PlatformAccount platform)
     {
@@ -90,110 +98,47 @@ public sealed class SteamPlatformSwitcher : IPlatformSwitcher
         return "";
     }
 
-    public async Task<IEnumerable<IAccount>?> GetUsers(PlatformAccount platform)
+    public async Task<IEnumerable<IAccount>?> GetUsers(PlatformAccount platform, Action? refreshUsers = null)
     {
-        var users = steamService.GetRememberUserList();
+        SteamConnectService.Current.RefreshSteamUsers();
+        Task2.InBackground(async () =>
+        {
+            await SteamConnectService.Current.RefreshSteamUsersInfo();
+            refreshUsers?.Invoke();
+        });
+
+        var users = SteamConnectService.Current.SteamUsers.Items;
+
         if (!users.Any_Nullable())
         {
             return null;
         }
 
-        #region 加载备注信息和 JumpList
+        var accounts = users.Select(s => new SteamAccount(s));
 
-        var accountRemarks = Ioc.Get<IPartialGameAccountSettings>()?.AccountRemarks;
-
-#if WINDOWS
-        List<(string title, string applicationPath, string iconResourcePath, string arguments, string description, string customCategory)>? jumplistData = new();
-#endif
-        foreach (var user in users)
+        var trayMenus = accounts.Select(user =>
         {
-            if (accountRemarks?.TryGetValue("Steam-" + user.SteamId64, out var remark) == true &&
-                !string.IsNullOrEmpty(remark))
-                user.Remark = remark;
-
-#if WINDOWS
+            var title = user.DisplayName ?? user.AccountId;
+            if (!string.IsNullOrEmpty(user.AliasName))
             {
-                var title = user.SteamNickName ?? user.SteamId64.ToString(CultureInfo.InvariantCulture);
-                if (!string.IsNullOrEmpty(user.Remark))
-                {
-                    title = user.SteamNickName + "(" + user.Remark + ")";
-                }
-
-                var processPath = Environment.ProcessPath;
-                processPath.ThrowIsNull();
-                if (!string.IsNullOrEmpty(user.AccountName)) jumplistData!.Add((title,
-                    applicationPath: processPath,
-                    iconResourcePath: processPath,
-                    arguments: $"-clt steam -account {user.AccountName}",
-                    description: Strings.UserChange_BtnTootlip,
-                    customCategory: Strings.UserFastChange));
+                title = user.DisplayName + "(" + user.AliasName + ")";
             }
-#endif
-        }
-
-#if WINDOWS
-        if (jumplistData.Any())
-        {
-            MainThread2.BeginInvokeOnMainThread(async () =>
+            return new TrayMenuItem
             {
-                var s = IJumpListService.Instance;
-                await s.AddJumpItemsAsync(jumplistData);
-            });
-        }
-#endif
-        #endregion
+                Name = title,
+                Command = platform.SwapToAccountCommand,
+                CommandParameter = user,
+            };
+        }).ToList();
 
-        #region 通过webapi加载头像图片用户信息
-        foreach (var user in users)
+        IApplication.Instance.UpdateMenuItems(Plugin.Instance.UniqueEnglishName, new TrayMenuItem
         {
-            var temp = await swWebService.GetUserInfo(user.SteamId64);
-            if (!string.IsNullOrEmpty(temp.SteamID))
-            {
-                user.SteamID = temp.SteamID;
-                user.OnlineState = temp.OnlineState;
-                user.MemberSince = temp.MemberSince;
-                user.VacBanned = temp.VacBanned;
-                user.Summary = temp.Summary;
-                user.PrivacyState = temp.PrivacyState;
-                user.AvatarIcon = temp.AvatarIcon;
-                user.AvatarMedium = temp.AvatarMedium;
-                user.AvatarFull = temp.AvatarFull;
-                user.MiniProfile = temp.MiniProfile;
+            Name = Plugin.Instance.Name,
+            Items = trayMenus,
+        });
 
-                //if (user.MiniProfile != null && !string.IsNullOrEmpty(user.MiniProfile.AnimatedAvatar))
-                //{
-                //    user.AvatarStream = imageHttpClientService.GetImageMemoryStreamAsync(user.MiniProfile.AnimatedAvatar, cache: true);
-                //}
-                //else
-                //{
-                //    user.AvatarStream = imageHttpClientService.GetImageMemoryStreamAsync(temp.AvatarFull, cache: true);
-                //}
-            }
-        }
-
-        #endregion
-
-        #region 加载动态头像头像框数据
-        //foreach (var user in users)
-        //{
-        //    if (user.MiniProfile == null)
-        //    {
-        //        user.MiniProfile = await swWebService.GetUserMiniProfile(user.SteamId32);
-        //    }
-        //    if (user.MiniProfile != null)
-        //    {
-        //        if (!string.IsNullOrEmpty(user.MiniProfile.AnimatedAvatar))
-        //            user.AvatarStream = imageHttpClientService.GetImageMemoryStreamAsync(user.MiniProfile.AnimatedAvatar, cache: true);
-
-        //        if (!string.IsNullOrEmpty(user.MiniProfile.AvatarFrame))
-        //            user.MiniProfile.AvatarFrameStream = imageHttpClientService.GetImageMemoryStreamAsync(user.MiniProfile.AvatarFrame, cache: true);
-
-        //        user.Level = user.MiniProfile.Level;
-        //    }
-        //}
-        #endregion
-
-        return users.Select(s => new SteamAccount(s));
+        await Task.CompletedTask;
+        return accounts;
     }
 
     public bool SetPlatformPath(PlatformAccount platform)
@@ -201,7 +146,7 @@ public sealed class SteamPlatformSwitcher : IPlatformSwitcher
         return false;
     }
 
-    public async Task DeleteAccountInfo(IAccount account, PlatformAccount platform)
+    public async Task<bool> DeleteAccountInfo(IAccount account, PlatformAccount platform)
     {
         if (account is SteamAccount steamAccount)
         {
@@ -217,8 +162,12 @@ public sealed class SteamPlatformSwitcher : IPlatformSwitcher
                 {
                     steamService.DeleteLocalUserData(steamAccount.SteamUser, false);
                 }
+
                 platform.Accounts?.Remove(account);
+                return true;
             }
         }
+        return false;
     }
+
 }

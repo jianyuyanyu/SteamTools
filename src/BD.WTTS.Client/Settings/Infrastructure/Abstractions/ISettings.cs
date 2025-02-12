@@ -1,4 +1,4 @@
-using Polly;
+using SJsonSerializer = System.Text.Json.JsonSerializer;
 using Microsoft.Extensions.FileProviders;
 
 // ReSharper disable once CheckNamespace
@@ -105,6 +105,7 @@ public interface ISettings
             IgnoreReadOnlyProperties = true,
             IncludeFields = false,
             WriteIndented = true,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         };
         o.Converters.Add(new JsonStringEnumConverter());
         return o;
@@ -162,7 +163,7 @@ public interface ISettings
             FileMode.Open,
             FileAccess.Read,
             FileShare.ReadWrite | FileShare.Delete);
-        jobj = JsonSerializer.Deserialize<JsonObject>(readStream, options);
+        jobj = SJsonSerializer.Deserialize<JsonObject>(readStream, options);
         if (jobj != null)
         {
             var jnode = jobj[TSettings.Name];
@@ -170,7 +171,7 @@ public interface ISettings
             {
                 options = ISettings.GetDefaultOptions();
                 options.TypeInfoResolver = ISettings.JsonTypeInfoResolver.Instance;
-                var settingsByRead = JsonSerializer.Deserialize<TSettings>(jnode, options);
+                var settingsByRead = SJsonSerializer.Deserialize<TSettings>(jnode, options);
                 return settingsByRead;
             }
         }
@@ -189,7 +190,7 @@ public interface ISettings<TSettings> : ISettings where TSettings : class, ISett
     /// <returns></returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static TSettings Deserialize(Stream utf8Json)
-        => JsonSerializer.Deserialize(utf8Json, TSettings.JsonTypeInfo) ?? new();
+        => SJsonSerializer.Deserialize(utf8Json, TSettings.JsonTypeInfo) ?? new();
 
     sealed class OptionsMonitor : IOptionsMonitor<TSettings>, IOptions<TSettings>
     {
@@ -233,13 +234,13 @@ public interface ISettings<TSettings> : ISettings where TSettings : class, ISett
             var settings_ = AllowNullDeserialize();
             if (settings_ != null)
             {
-                settings = settings_;
-
                 // 监听到的设置模型实例，如果和 new 一个空的数据一样的，就是默认值则忽略
                 var newSettingsData = Serializable.SMP2(settings);
                 var emptySettingsData = Serializable.SMP2(new TSettings());
                 if (newSettingsData.SequenceEqual(emptySettingsData))
                     return;
+
+                settings = settings_;
 
                 listener.Invoke(settings, TSettings.Name);
             }
@@ -288,9 +289,14 @@ public interface ISettings<TSettings> : ISettings where TSettings : class, ISett
         bool isInvalid = false;
         if (writeFile)
         {
-            using var fs = File.Create(settingsFilePath);
+            using var ms = new MemoryStream();
             settings = new();
-            settings.Save_____(fs);
+            settings.Save_____(ms);
+            ms.Position = 0;
+            using var fs = File.Create(settingsFilePath);
+            ms.CopyTo(fs);
+            fs.Flush();
+            fs.SetLength(fs.Position);
         }
         else
         {
@@ -302,6 +308,22 @@ public interface ISettings<TSettings> : ISettings where TSettings : class, ISett
             {
                 settings = new();
                 isInvalid = true;
+
+                // 尝试将错误的配置保存为 .json.load.bak 防止启动软件当前配置被覆盖
+                if (!SettingsExtensions.IsZeroFile(settingsFilePath))
+                {
+                    var settingsFilePath_load_bak = $"{settingsFilePath}.load.bak";
+                    try
+                    {
+                        IOPath.FileIfExistsItDelete(settingsFilePath_load_bak);
+                        File.Move(settingsFilePath,
+                            settingsFilePath_load_bak, true);
+                    }
+                    catch
+                    {
+
+                    }
+                }
             }
         }
 
@@ -318,6 +340,18 @@ public interface ISettings<TSettings> : ISettings where TSettings : class, ISett
 
 internal static class SettingsExtensions
 {
+    internal static bool IsZeroFile(string filePath, bool @catch = true)
+    {
+        try
+        {
+            return new FileInfo(filePath).Length == 0;
+        }
+        catch
+        {
+            return @catch;
+        }
+    }
+
     /// <summary>
     /// 将实例序列化为字符串
     /// </summary>
@@ -326,7 +360,7 @@ internal static class SettingsExtensions
     /// <returns></returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string Serialize<TSettings>(this TSettings settings) where TSettings : ISettings
-        => JsonSerializer.Serialize(settings, typeof(TSettings), TSettings.JsonSerializerContext);
+        => SJsonSerializer.Serialize(settings, typeof(TSettings), TSettings.JsonSerializerContext);
 
     /// <summary>
     /// 将实例序列化写入 UTF8 Json 流
@@ -336,7 +370,7 @@ internal static class SettingsExtensions
     /// <param name="settings"></param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Serialize<TSettings>(this TSettings settings, Stream utf8Json) where TSettings : ISettings
-        => JsonSerializer.Serialize(utf8Json, settings, typeof(TSettings), TSettings.JsonSerializerContext);
+        => SJsonSerializer.Serialize(utf8Json, settings, typeof(TSettings), TSettings.JsonSerializerContext);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void Save_____<TSettings>(this TSettings settings, Stream utf8Json) where TSettings : ISettings
@@ -408,9 +442,12 @@ internal static class SettingsExtensions
 
                 try
                 {
-                    var settingsFilePath2 = $"{settingsFilePath}.bak";
-                    IOPath.FileTryDelete(settingsFilePath2);
-                    File.Move(settingsFilePath, settingsFilePath2);
+                    if (!SettingsExtensions.IsZeroFile(settingsFilePath))
+                    {
+                        var settingsFilePath2 = $"{settingsFilePath}.save.bak";
+                        IOPath.FileTryDelete(settingsFilePath2);
+                        File.Move(settingsFilePath, settingsFilePath2, true);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -421,6 +458,8 @@ internal static class SettingsExtensions
 
                 Policy.Handle<Exception>().Retry(3).Execute(() =>
                 {
+                    var dirPath = Path.GetDirectoryName(settingsFilePath);
+                    if (dirPath != null) IOPath.DirCreateByNotExists(dirPath);
                     using var writeStream = OpenOrCreate(settingsFilePath);
                     if (writeStream == null)
                     {

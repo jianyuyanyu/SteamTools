@@ -2,9 +2,13 @@
 // ReSharper disable once CheckNamespace
 namespace BD.WTTS.Services.Implementation;
 
-partial class WindowsPlatformServiceImpl
+partial class WindowsPlatformServiceImpl : IRegistryService
 {
-    static readonly Lazy<string> _regedit_exe = new(() => Path.Combine(_windir.Value, "regedit.exe"));
+    static readonly Lazy<string> _regedit_exe = new(() =>
+    {
+        var regedit_exe = Path.Combine(_windir!.Value, "regedit.exe");
+        return regedit_exe;
+    });
 
     /// <summary>
     /// %windir%\regedit.exe
@@ -23,36 +27,44 @@ partial class WindowsPlatformServiceImpl
     /// <summary>
     /// 带参数(可选/null)启动 %windir%\regedit.exe 并等待退出后删除文件
     /// </summary>
-    /// <param name="path"></param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void StartProcessRegedit(
+    public static async Task<byte> StartProcessRegeditAsync(
         string path,
         string contents,
-        int millisecondsDelay = 3700)
+        int millisecondsDelay = 3700,
+        string? markKey = null,
+        string? markValue = null)
     {
         File.WriteAllText(path, contents, Encoding.UTF8);
         if (IsPrivilegedProcess)
         {
             // 管理员权限则直接执行
-            StartProcessRegeditCore(path, millisecondsDelay);
+            await StartProcessRegeditCoreAsync(path, millisecondsDelay);
+            return 200;
         }
         else
         {
             // 通过 IPC 调用管理员服务进程执行
             var ipcPlatformService = IPlatformService.IPCRoot.Instance.GetAwaiter().GetResult();
-            ipcPlatformService.StartProcessRegeditCoreIPC(path, millisecondsDelay);
+            var r = await ipcPlatformService.StartProcessRegeditCoreIPCAsync(markKey, markValue, path, millisecondsDelay);
+            return r;
         }
     }
 
+    Task<byte> IRegistryService.StartProcessRegeditAsync(
+        string path,
+        string contents,
+        int millisecondsDelay) => StartProcessRegeditAsync(path, contents, millisecondsDelay);
+
     /// <inheritdoc cref="StartProcessRegedit(string, string, int)"/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void StartProcessRegeditCore(
+    internal static async Task StartProcessRegeditCoreAsync(
         string path,
         int millisecondsDelay = 3700)
     {
         var args = $"/s \"{path}\"";
         var p = Process2.Start(Regedit, args, workingDirectory: _windir.Value);
-        IOPath.TryDeleteInDelay(p, path, millisecondsDelay, millisecondsDelay);
+        await IOPath.TryDeleteInDelayAsync(p, path, millisecondsDelay, millisecondsDelay);
     }
 
     #region Registry2
@@ -67,7 +79,7 @@ partial class WindowsPlatformServiceImpl
     }
 
     /// <inheritdoc cref="Registry2.ReadRegistryKey(string, RegistryView)"/>
-    string? IPCPlatformService.ReadRegistryKey(string encodedPath, RegistryView view)
+    public string? ReadRegistryKey(string encodedPath, RegistryView view)
     {
         if (IsPrivilegedProcess)
         {
@@ -92,9 +104,19 @@ partial class WindowsPlatformServiceImpl
         return result;
     }
 
-    bool IPCPlatformService.SetRegistryKey(string encodedPath, RegistryView view, string? value)
+    public bool SetRegistryKey(string encodedPath, RegistryView view, string? value)
     {
-        if (IsPrivilegedProcess)
+        var callIpc = !IsPrivilegedProcess;
+
+        if (DesktopBridge.IsRunningAsUwp)
+        {
+            if (Startup.Instance.IsMainProcess)
+            {
+                callIpc = true;
+            }
+        }
+
+        if (!callIpc)
         {
             // 管理员权限则直接执行
             var result = SetRegistryKeyCore(encodedPath, view, value);
@@ -117,9 +139,19 @@ partial class WindowsPlatformServiceImpl
         return result;
     }
 
-    bool IPCPlatformService.DeleteRegistryKey(string encodedPath, RegistryView view)
+    public bool DeleteRegistryKey(string encodedPath, RegistryView view)
     {
-        if (IsPrivilegedProcess)
+        var callIpc = !IsPrivilegedProcess;
+
+        if (DesktopBridge.IsRunningAsUwp)
+        {
+            if (Startup.Instance.IsMainProcess)
+            {
+                callIpc = true;
+            }
+        }
+
+        if (!callIpc)
         {
             // 管理员权限则直接执行
             var result = DeleteRegistryKeyCore(encodedPath, view);

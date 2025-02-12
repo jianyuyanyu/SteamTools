@@ -1,4 +1,5 @@
 using BD.WTTS.Properties;
+using BD.WTTS.UI.Views.Pages;
 
 namespace BD.WTTS.Plugins;
 
@@ -15,18 +16,17 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
 
     public sealed override string UniqueEnglishName => moduleName;
 
-    public sealed override string Description => "游戏工具";
+    public sealed override string Description => "通用游戏工具";
 
     protected sealed override string? AuthorOriginalString => null;
 
-    public sealed override object? Icon => new MemoryStream(Resources.toolbox); //"avares://BD.WTTS.Client.Plugins.GameTools/UI/Assets/toolbox.ico";
+    public sealed override object? Icon => Resources.toolbox; //"avares://BD.WTTS.Client.Plugins.GameTools/UI/Assets/toolbox.ico";
 
-    public override IEnumerable<TabItemViewModel>? GetMenuTabItems()
+    public override IEnumerable<MenuTabItemViewModel>? GetMenuTabItems()
     {
-        yield return new MenuTabItemViewModel()
+        yield return new MenuTabItemViewModel(this, nameof(Strings.GameRelated))
         {
-            ResourceKeyOrName = nameof(Strings.GameRelated),
-            PageType = null,
+            PageType = typeof(GameToolsPage),
             IsResourceGet = true,
             IconKey = Icon,
         };

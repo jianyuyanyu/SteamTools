@@ -1,4 +1,5 @@
 #if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
+using Newtonsoft.Json;
 using AppResources = BD.WTTS.Client.Resources.Strings;
 
 // ReSharper disable once CheckNamespace
@@ -6,9 +7,9 @@ namespace BD.WTTS.Services;
 
 public sealed class ASFService : ReactiveObject
 {
-    static ASFService? mCurrent;
+    static readonly Lazy<ASFService> mCurrent = new(() => new(), LazyThreadSafetyMode.ExecutionAndPublication);
 
-    public static ASFService Current => mCurrent ?? new();
+    public static ASFService Current => mCurrent.Value;
 
     readonly IArchiSteamFarmService archiSteamFarmService = IArchiSteamFarmService.Instance;
 
@@ -30,9 +31,9 @@ public sealed class ASFService : ReactiveObject
 
     public IConsoleBuilder ConsoleLogBuilder { get; } = new ConsoleBuilder();
 
-    public SourceCache<Bot, string> SteamBotsSourceList;
+    public SourceCache<BotViewModel, string> SteamBotsSourceList;
 
-    public bool IsASFRuning => archiSteamFarmService.StartTime != null;
+    public bool IsASFRuning => archiSteamFarmService.ASFProcess != null;
 
     GlobalConfig? _GlobalConfig;
 
@@ -44,11 +45,9 @@ public sealed class ASFService : ReactiveObject
 
     private ASFService()
     {
-        mCurrent = this;
+        SteamBotsSourceList = new SourceCache<BotViewModel, string>(t => t.Bot.BotName);
 
-        SteamBotsSourceList = new SourceCache<Bot, string>(t => t.BotName);
-
-        archiSteamFarmService.OnConsoleWirteLine += OnConsoleWirteLine;
+        archiSteamFarmService.OnConsoleWirteLine += OnConsoleWriteLine;
 
         ASFSettings.ConsoleMaxLine.Subscribe(x =>
         {
@@ -59,14 +58,23 @@ public sealed class ASFService : ReactiveObject
         });
     }
 
-    void OnConsoleWirteLine(string message)
+    void OnConsoleWriteLine(string message)
     {
-        MainThread2.InvokeOnMainThreadAsync(() =>
+        MainThread2.BeginInvokeOnMainThread(() =>
         {
-            ConsoleLogBuilder.AppendLine(message);
-            var text = ConsoleLogBuilder.ToString();
-            ConsoleLogText = text;
+            //ConsoleLogBuilder.Append(message); // message 包含换行
+            //var text = ConsoleLogBuilder.ToString();
+            ConsoleLogText += message;
         });
+    }
+
+    public void ShellMessageInput(string? input)
+    {
+        if (string.IsNullOrEmpty(input))
+        {
+            return;
+        }
+        _ = archiSteamFarmService.ShellMessageInput(input);
     }
 
     /// <summary>
@@ -80,26 +88,22 @@ public sealed class ASFService : ReactiveObject
     {
         if (IsASFRunOrStoping) return;
 
-        if (showToast) Toast.Show(AppResources.ASF_Starting, ToastLength.Short);
+        if (showToast) Toast.Show(ToastIcon.Info, AppResources.ASF_Starting, ToastLength.Short);
 
         IsASFRunOrStoping = true;
 
-        //if (ASF.GlobalConfig?.SteamOwnerID is null or 0)
-        //{
-        //    Toast.Show(AppResources.ASF_Starting, ToastLength.Long);
-        //    return;
-        //}
-
-        var isOk = await archiSteamFarmService.StartAsync();
+        ConsoleLogText = string.Empty;
+        (var isOk, var ipcURL) = await archiSteamFarmService.StartAsync();
         if (!isOk)
         {
-            if (showToast) Toast.Show(AppResources.ASF_Stoped, ToastLength.Short);
+            if (showToast) Toast.Show(ToastIcon.Error, AppResources.ASF_Stoped, ToastLength.Short);
+            IsASFRunOrStoping = false;
             return;
         }
 
         RefreshBots();
 
-        IPCUrl = archiSteamFarmService.GetIPCUrl();
+        IPCUrl = ipcURL;
 
         MainThread2.BeginInvokeOnMainThread(() =>
         {
@@ -108,7 +112,7 @@ public sealed class ASFService : ReactiveObject
 
         IsASFRunOrStoping = false;
 
-        if (showToast) Toast.Show(AppResources.ASF_Started, ToastLength.Short);
+        if (showToast) Toast.Show(ToastIcon.Success, AppResources.ASF_Started, ToastLength.Short);
     }
 
     public Task StopASFAsync() => StopASFCoreAsync(true);
@@ -117,11 +121,13 @@ public sealed class ASFService : ReactiveObject
     {
         if (IsASFRunOrStoping) return;
 
-        if (showToast) Toast.Show(AppResources.ASF_Stoping, ToastLength.Short);
+        if (showToast) Toast.Show(ToastIcon.Info, AppResources.ASF_Stoping, ToastLength.Short);
 
         IsASFRunOrStoping = true;
 
         await archiSteamFarmService.StopAsync();
+
+        SteamBotsSourceList.Clear();
 
         MainThread2.BeginInvokeOnMainThread(() =>
         {
@@ -130,21 +136,92 @@ public sealed class ASFService : ReactiveObject
 
         IsASFRunOrStoping = false;
 
-        if (showToast) Toast.Show(AppResources.ASF_Stoped, ToastLength.Short);
+        if (showToast) Toast.Show(ToastIcon.Info, AppResources.ASF_Stoped, ToastLength.Short);
     }
 
-    public void RefreshBots()
+    public async void RefreshBots()
     {
-        var bots = archiSteamFarmService.GetReadOnlyAllBots();
+        var bots = await archiSteamFarmService.GetReadOnlyAllBots();
         if (bots.Any_Nullable())
         {
-            SteamBotsSourceList.AddOrUpdate(bots!.Values);
+            SteamBotsSourceList.Clear();
+            SteamBotsSourceList.AddOrUpdate(bots!.Values.Select(s => (BotViewModel)s));
         }
     }
 
-    public void RefreshConfig()
+    public async void RefreshConfig()
     {
-        GlobalConfig = archiSteamFarmService.GetGlobalConfig();
+        GlobalConfig = await archiSteamFarmService.GetGlobalConfig();
+    }
+
+    public void OpenFolder(string tag)
+    {
+        if (string.IsNullOrEmpty(ASFSettings.ArchiSteamFarmExePath.Value))
+        {
+            Toast.Show(ToastIcon.Error, BDStrings.ASF_SetExePathFirst);
+            return;
+        }
+
+        string folderASFPathValue = string.Empty;
+        if (!Enum.TryParse<EPathFolder>(tag, true, out var folderASFPath) ||
+            !Path.Exists(folderASFPathValue = folderASFPath.GetFolderPath()))
+        {
+            Toast.Show(ToastIcon.Error, BDStrings.ASF_SelectASFExePath);
+            return;
+        }
+
+        IPlatformService.Instance.OpenFolder(folderASFPathValue);
+    }
+
+    async void OpenBrowserCore(ActionItem tag)
+    {
+        var url = tag switch
+        {
+            ActionItem.Repo => "https://github.com/JustArchiNET/ArchiSteamFarm",
+            ActionItem.Wiki => "https://github.com/JustArchiNET/ArchiSteamFarm/wiki/Home-zh-CN",
+            ActionItem.ConfigGenerator => "https://justarchinet.github.io/ASF-WebConfigGenerator",
+            _ => string.Empty,
+        };
+
+        if (url != string.Empty)
+        {
+            await Browser2.OpenAsync(url, BrowserLaunchMode.External);
+            return;
+        }
+
+        url = tag switch
+        {
+            ActionItem.WebConfig => IPCUrl + "/asf-config",
+            ActionItem.WebAddBot => IPCUrl + "/bot/new",
+            _ => IPCUrl,
+        };
+
+        if (string.IsNullOrEmpty(IPCUrl) && !Uri.TryCreate(IPCUrl, UriKind.Absolute, out _))
+        {
+            string? ipc_error = null;
+            if (!ASFService.Current.IsASFRuning)
+            {
+                ipc_error = BDStrings.ASF_RequirRunASF;
+            }
+            else if (!ASF.IsReady)
+            {
+                // IPC 未启动前无法获取正确的端口号，会导致拼接的 URL 值不正确
+                ipc_error = BDStrings.ASF_IPCIsReadyFalse;
+            }
+            if (ipc_error != null)
+            {
+                Toast.Show(ToastIcon.Error, ipc_error);
+                return;
+            }
+        }
+
+        await Browser2.OpenAsync(url, BrowserLaunchMode.External);
+    }
+
+    public void OpenBrowser(string? tag)
+    {
+        var tag_ = Enum.TryParse<ActionItem>(tag, out var @enum) ? @enum : default;
+        OpenBrowserCore(tag_);
     }
 
     public async void ImportBotFiles(IEnumerable<string>? files) => await ImportJsonFileAsync(files, allowBot: true, allowGlobal: false);
@@ -162,23 +239,60 @@ public sealed class ASFService : ReactiveObject
             if (file.Exists && string.Equals(file.Extension, SharedInfo.JsonConfigExtension, StringComparison.OrdinalIgnoreCase))
             {
                 object? config;
-                if (file.Name != SharedInfo.GlobalConfigFileName)
+                string json;
+                try
                 {
-                    if (!allowBot) continue;
-                    var bot = await BotConfig.Load(file.FullName).ConfigureAwait(false);
-                    config = bot.BotConfig;
+                    json = await File.ReadAllTextAsync(file.FullName).ConfigureAwait(false);
+                    if (string.IsNullOrEmpty(json))
+                    {
+                        ASF.ArchiLogger.LogGenericError(string.Format(CultureInfo.CurrentCulture, Strings.ErrorIsEmpty, nameof(json)));
+
+                        return;
+                    }
+
+                    if (file.Name != SharedInfo.GlobalConfigFileName)
+                    {
+                        if (!allowBot) continue;
+                        var botConfig = JsonConvert.DeserializeObject<BotConfig>(json);
+                        if (botConfig == null)
+                        {
+                            ASF.ArchiLogger.LogNullError(botConfig);
+                            return;
+                        }
+
+                        if (await archiSteamFarmService.SaveBot(Path.GetFileNameWithoutExtension(file.FullName), botConfig))
+                            config = botConfig;
+                        else
+                            return;
+                    }
+                    else
+                    {
+                        if (!allowGlobal) continue;
+                        var globalConfig = JsonConvert.DeserializeObject<GlobalConfig>(json);
+                        if (globalConfig == null)
+                        {
+                            ASF.ArchiLogger.LogNullError(globalConfig);
+                            return;
+                        }
+
+                        if (await archiSteamFarmService.SaveGlobalConfig(globalConfig))
+                            config = globalConfig;
+                        else
+                            return;
+                    }
+
                 }
-                else
+                catch (Exception e)
                 {
-                    if (!allowGlobal) continue;
-                    var g = await GlobalConfig.Load(file.FullName).ConfigureAwait(false);
-                    config = g.GlobalConfig;
+                    ASF.ArchiLogger.LogGenericException(e);
+
+                    return;
                 }
                 if (config != null)
                 {
                     try
                     {
-                        file.CopyTo(Path.Combine(SharedInfo.ConfigDirectory, file.Name), true);
+                        file.CopyTo(Path.Combine(SharedInfo.HomeDirectory, SharedInfo.ConfigDirectory, file.Name), true);
                         num++;
                     }
                     catch (Exception ex)
@@ -188,12 +302,100 @@ public sealed class ASFService : ReactiveObject
                     }
                     if (allowGlobal && config is GlobalConfig g)
                     {
-                        GlobalConfig = ASF.GlobalConfig = g;
+                        GlobalConfig = g;
                     }
                 }
             }
         }
-        Toast.Show(string.Format(AppResources.LocalAuth_ImportSuccessTip_, num));
+        Toast.Show(ToastIcon.Success, string.Format(AppResources.LocalAuth_ImportSuccessTip_, num));
+    }
+
+    public async Task SelectASFProgramLocationAsync()
+    {
+        AvaloniaFilePickerFileTypeFilter fileTypes = new AvaloniaFilePickerFileTypeFilter.Item[] {
+            new("ArchiSteamFarm") {
+                Patterns = new[] { "ArchiSteamFarm.exe", },
+                //MimeTypes =
+                //AppleUniformTypeIdentifiers =
+                },
+        };
+        await FilePicker2.PickAsync((path) =>
+        {
+            if (!string.IsNullOrEmpty(path))
+                ASFSettings.ArchiSteamFarmExePath.Value = path;
+        }, fileTypes);
+    }
+
+    public async void DownloadASFAsync(string variant = "win-x64", IProgress<float>? progress = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var assetName = $"{nameof(ASF)}-{variant}.zip";
+            using var httpClient = new HttpClient();
+            httpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", IHttpPlatformHelperService.Instance.UserAgent);
+            using var latestReleaseStream = await httpClient.GetStreamAsync("https://api.github.com/repos/JustArchiNET/ArchiSteamFarm/releases/latest", cancellationToken);
+            using var element = await JsonDocument.ParseAsync(latestReleaseStream, cancellationToken: cancellationToken);
+            if (element.RootElement.TryGetProperty("assets", out var assets) &&
+                assets.EnumerateArray().FirstOrDefault(s => s.GetProperty("name").ValueEquals(assetName))
+                .TryGetProperty("browser_download_url", out var downloadUrl))
+            {
+                var tag_name = element.RootElement.GetProperty("tag_name").GetString();
+                var downloadSavingPath = Path.Combine(Plugin.Instance.AppDataDirectory, $"ASF-{tag_name}", assetName);
+                var downloadSavingDir = Path.GetDirectoryName(downloadSavingPath)!;
+                Directory.CreateDirectory(downloadSavingDir);
+
+                var message = new HttpRequestMessage(HttpMethod.Get, downloadUrl.GetString());
+                var result = await httpClient.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                using var contentStream = await result.Content.ReadAsStreamAsync(cancellationToken);
+
+                byte batch = 0;
+                long readThisBatch = 0;
+                long batchIncreaseSize = result.Content.Headers.ContentLength.GetValueOrDefault() / 100;
+                await using (FileStream fileStream = new(downloadSavingPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
+                {
+                    ArrayPool<byte> bytePool = ArrayPool<byte>.Shared;
+                    byte[] buffer = bytePool.Rent(4096);
+
+                    try
+                    {
+                        while (contentStream.CanRead)
+                        {
+                            int read = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+
+                            if (read == 0)
+                                break;
+
+                            await fileStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                            if ((progress == null) || (batchIncreaseSize == 0) || (batch >= 99))
+                            {
+                                continue;
+                            }
+
+                            readThisBatch += read;
+
+                            while ((readThisBatch >= batchIncreaseSize) && (batch < 99))
+                            {
+                                readThisBatch -= batchIncreaseSize;
+                                progress.Report(++batch);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        bytePool.Return(buffer);
+                    }
+                }
+
+                ZipFile.ExtractToDirectory(downloadSavingPath, downloadSavingDir);
+                ASFSettings.ArchiSteamFarmExePath.Value = Path.Combine(downloadSavingDir, "ArchiSteamFarm.exe");
+                progress?.Report(100);
+                Toast.Show(ToastIcon.Success, "ASF 下载成功");
+            }
+        }
+        catch (Exception ex)
+        {
+            Toast.LogAndShowT(ex, "ASF 文件下载异常");
+        }
     }
 }
 #endif

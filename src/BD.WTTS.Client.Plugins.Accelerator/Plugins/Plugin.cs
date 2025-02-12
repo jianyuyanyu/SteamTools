@@ -1,5 +1,7 @@
 using BD.WTTS.Properties;
 using BD.WTTS.UI.Views.Pages;
+using dotnetCampus.Ipc.CompilerServices.GeneratedProxies;
+using dotnetCampus.Ipc.Pipes;
 
 namespace BD.WTTS.Plugins;
 
@@ -8,6 +10,13 @@ namespace BD.WTTS.Plugins;
 #endif
 public sealed class Plugin : PluginBase<Plugin>, IPlugin
 {
+    static Plugin()
+    {
+#if WINDOWS
+        XunYouSDK.Initialize();
+#endif
+    }
+
     const string moduleName = AssemblyInfo.Accelerator;
 
     public override Guid Id => Guid.Parse(AssemblyInfo.AcceleratorId);
@@ -16,17 +25,16 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
 
     public sealed override string UniqueEnglishName => moduleName;
 
-    public sealed override string Description => "提供一些游戏相关网站服务的加速及脚本注入功能。";
+    public sealed override string Description => "提供一些游戏相关网站服务的加速及脚本注入功能";
 
     protected sealed override string? AuthorOriginalString => null;
 
-    public sealed override object? Icon => new MemoryStream(Resources.accelerator); //"avares://BD.WTTS.Client.Plugins.Accelerator/UI/Assets/accelerator.ico";
+    public sealed override object? Icon => Resources.accelerator; //"avares://BD.WTTS.Client.Plugins.Accelerator/UI/Assets/accelerator.ico";
 
-    public override IEnumerable<TabItemViewModel>? GetMenuTabItems()
+    public override IEnumerable<MenuTabItemViewModel>? GetMenuTabItems()
     {
-        yield return new MenuTabItemViewModel()
+        yield return new MenuTabItemViewModel(this, nameof(Strings.CommunityFix))
         {
-            ResourceKeyOrName = nameof(Strings.CommunityFix),
             PageType = typeof(MainFramePage),
             IsResourceGet = true,
             //IconKey = "SpeedHigh",
@@ -44,6 +52,7 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
 
     readonly TaskCompletionSource<IReverseProxyService> reverseProxyService = new();
     readonly TaskCompletionSource<ICertificateManager> certificateManager = new();
+    //readonly TaskCompletionSource<IAcceleratorService> acceleratorService = new();
 
     public override void ConfigureDemandServices(IServiceCollection services, Startup startup)
     {
@@ -58,10 +67,31 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
 #endif
         }
 
+        services.AddSingleton<INetworkTestService, NetworkTestService>();
+
+        //if (startup.HasIPCRoot)
+        //{
+        //    services.AddSingleton<IAcceleratorService, BackendAcceleratorServiceImpl>();
+        //}
+        //else if (startup.IsMainProcess)
+        {
+            //services.AddSingleton(_ => acceleratorService.Task.GetAwaiter().GetResult());
+            services.AddSingleton<IAcceleratorService, BackendAcceleratorServiceImpl>();
+            services.AddSingleton<IXunYouAccelStateToFrontendCallback, XunYouAccelStateToFrontendCallbackImpl>();
+        }
+
         if (startup.HasServerApiClient)
         {
             // 添加仓储服务
             services.AddSingleton<IScriptRepository, ScriptRepository>();
+        }
+    }
+
+    sealed class XunYouAccelStateToFrontendCallbackImpl : IXunYouAccelStateToFrontendCallback
+    {
+        public void XunYouAccelStateToFrontendCallback(XunYouAccelStateModel m)
+        {
+            GameAcceleratorService.Current.XYAccelState = m;
         }
     }
 
@@ -70,6 +100,18 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
 #if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
         services.AddSingleton<IProxyService>(_ => ProxyService.Current);
 #endif
+    }
+
+    public override void ConfigureServices(IpcProvider ipcProvider, Startup startup)
+    {
+        //if (startup.HasIPCRoot)
+        //{
+        //    ipcProvider.CreateIpcJoint(Ioc.Get<IAcceleratorService>());
+        //}
+        //else if (startup.IsMainProcess)
+        //{
+        //    ipcProvider.CreateIpcJoint(Ioc.Get<IXunYouAccelStateToFrontendCallback>());
+        //}
     }
 
     public override async ValueTask OnInitializeAsync()
@@ -95,6 +137,7 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
             // 从子进程中获取 IPC 远程服务
             await GetIpcRemoteServiceAsync(moduleName, ipc, reverseProxyService);
             await GetIpcRemoteServiceAsync(moduleName, ipc, certificateManager);
+            //await GetIpcRemoteServiceAsync(IPlatformService.IPCRoot.moduleName, ipc, acceleratorService);
 #if DEBUG
             //try
             //{
@@ -111,7 +154,7 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
 
             //if (ResourceService.IsChineseSimplified)
             //{
-            await ProxyService.Current.InitializeAsync();
+            await MainThread2.InvokeOnMainThreadAsync(ProxyService.Current.InitializeAsync);
             //}
         }
     }
@@ -125,14 +168,10 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
     {
         try
         {
-            var reverseProxyService = Ioc.Get_Nullable<IReverseProxyService>();
-            if (reverseProxyService != null)
-            {
-                await reverseProxyService.StopProxyAsync();
-            }
-            ProxyService.OnExitRestoreHosts();
+            await ProxyService.Current.ExitAsync();
+            GameAcceleratorSettings.MyGames.Save();
         }
-        catch (ObjectDisposedException)
+        catch
         {
 
         }
@@ -143,7 +182,7 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
     /// <summary>
     /// 获取子进程文件所在路径
     /// </summary>
-    string? SubProcessPath
+    internal string? SubProcessPath
     {
         get
         {
@@ -202,5 +241,6 @@ public sealed class Plugin : PluginBase<Plugin>, IPlugin
     public override IEnumerable<(Action<IServiceCollection>? @delegate, bool isInvalid, string name)>? GetConfiguration(bool directoryExists)
     {
         yield return GetConfiguration<ProxySettings_>(directoryExists);
+        yield return GetConfiguration<GameAcceleratorSettings_>(directoryExists);
     }
 }

@@ -15,13 +15,14 @@ sealed partial class YarpReverseProxyServiceImpl : ReverseProxyServiceImpl, IRev
 
     public YarpReverseProxyServiceImpl(
         IPCSubProcessService ipc,
-        IDnsAnalysisService dnsAnalysis,
-        ICertificateManager certificateManager) : base(dnsAnalysis)
+        DnsAnalysisServiceImpl dnsAnalysisServiceImpl,
+        DnsDohAnalysisService dnsDohAnalysisService,
+        ICertificateManager certificateManager) : base(dnsAnalysisServiceImpl, dnsDohAnalysisService)
     {
         this.ipc = ipc;
         platformService = GetIPCService<IPCPlatformService>(nameof(platformService));
         toast = GetIPCService<IPCToastService>(nameof(toast));
-        CertificateManager = certificateManager;
+        CertificateManager = (CertificateManagerImpl)certificateManager;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -35,9 +36,65 @@ sealed partial class YarpReverseProxyServiceImpl : ReverseProxyServiceImpl, IRev
         return ipcService;
     }
 
-    public override ICertificateManager CertificateManager { get; }
+    public override CertificateManagerImpl CertificateManager { get; }
 
     public override bool ProxyRunning => app != null;
+
+    protected override void CheckRootCertificate()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            ICertificateManager.Constants.CheckRootCertificate(
+                platformService,
+                CertificateManager);
+
+            try
+            {
+                X509Certificate2? cer = CertificateManager.RootCertificatePackable;
+                if (cer is not null &&
+                    DateTime.Now <= cer.NotAfter && cer.NotAfter <= DateTime.Now.AddMilliseconds(int.MaxValue))
+                {
+                    var interval = cer.NotAfter - DateTime.Now;
+
+                    _certificateTimer = new System.Timers.Timer(interval)
+                    {
+                        AutoReset = false,
+                    };
+
+                    _certificateTimer.Elapsed += async (_, _) =>
+                    {
+                        try
+                        {
+                            ICertificateManager.Constants.CheckRootCertificate(
+                                platformService,
+                                CertificateManager);
+
+                            await StopProxyAsync();
+                            await StartProxyImpl();
+                        }
+                        catch (Exception e)
+                        {
+                            e.LogAndShowT(TAG, msg: "CheckRootCertificate in Timer.Elapsed Error");
+                        }
+                    };
+                    _certificateTimer.Start();
+                }
+            }
+            catch (Exception e)
+            {
+                e.LogAndShowT(TAG, msg: "CheckRootCertificate Error");
+            }
+        }
+    }
+
+    private System.Timers.Timer? _certificateTimer;
+
+    private void StopCertificateTimer()
+    {
+        _certificateTimer?.Stop();
+        _certificateTimer?.Dispose();
+        _certificateTimer = null;
+    }
 
     protected override Task<StartProxyResult> StartProxyImpl() => Task.FromResult(StartProxyCore());
 
@@ -54,6 +111,8 @@ sealed partial class YarpReverseProxyServiceImpl : ReverseProxyServiceImpl, IRev
                 WebRootPath = RootPath,
             });
 
+            builder.Logging.AddProvider(new LogConsoleService.Utf8StringLoggerProvider(AssemblyInfo.Accelerator));
+
             builder.Services.Configure<HostFilteringOptions>(static o =>
             {
                 o.AllowEmptyHosts = true;
@@ -69,17 +128,19 @@ sealed partial class YarpReverseProxyServiceImpl : ReverseProxyServiceImpl, IRev
             builder.WebHost.UseKestrel(options =>
             {
                 options.AddServerHeader = false;
+                options.RequestHeaderEncodingSelector = _ => Encoding.UTF8;
+                options.ResponseHeaderEncodingSelector = _ => Encoding.UTF8;
                 options.NoLimit();
-#if !NOT_WINDOWS
+#if WINDOWS
 #if !NET7_0_OR_GREATER
-                            if (OperatingSystem2.IsWindows7())
-                            {
-                                //https://github.com/dotnet/aspnetcore/issues/22563
-                                options.ConfigureHttpsDefaults(httpsOptions =>
-                                {
-                                    httpsOptions.SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
-                                });
-                            }
+                if (OperatingSystem2.IsWindows7())
+                {
+                    //https://github.com/dotnet/aspnetcore/issues/22563
+                    options.ConfigureHttpsDefaults(httpsOptions =>
+                    {
+                        httpsOptions.SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
+                    });
+                }
 #endif
                 //options.ListenSshReverseProxy();
                 //options.ListenGitReverseProxy();
@@ -131,8 +192,14 @@ sealed partial class YarpReverseProxyServiceImpl : ReverseProxyServiceImpl, IRev
         }
     }
 
+    public void Exit()
+    {
+        ipc.Dispose();
+    }
+
     public async Task StopProxyAsync()
     {
+        StopCertificateTimer();
         Scripts = null;
         if (app == null) return;
         await app.StopAsync();
@@ -147,6 +214,12 @@ sealed partial class YarpReverseProxyServiceImpl : ReverseProxyServiceImpl, IRev
         var flowStatistics = flowAnalyzer?.GetFlowStatistics();
         var bytes = Serializable.SMP2(flowStatistics);
         return bytes;
+    }
+
+    public string? GetLogAllMessage()
+    {
+        var result = LogConsoleService.Builder;
+        return result.ToString();
     }
 
     // IDisposable

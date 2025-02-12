@@ -1,4 +1,4 @@
-#if !NOT_WINDOWS
+#if WINDOWS
 // https://github.com/dotnetcore/FastGithub/blob/2.1.4/FastGithub.HttpServer/TcpReverseProxyHandler.cs
 
 // ReSharper disable once CheckNamespace
@@ -9,9 +9,9 @@ namespace BD.WTTS.Services.Implementation;
 /// </summary>
 abstract class TcpReverseProxyHandler : ConnectionHandler
 {
-    private readonly IDomainResolver domainResolver;
-    private readonly DnsEndPoint endPoint;
-    private readonly TimeSpan connectTimeout = TimeSpan.FromSeconds(10d);
+    readonly IDomainResolver domainResolver;
+    readonly DnsEndPoint endPoint;
+    readonly TimeSpan connectTimeout = TimeSpan.FromSeconds(10d);
 
     public TcpReverseProxyHandler(IDomainResolver domainResolver, DnsEndPoint endPoint)
     {

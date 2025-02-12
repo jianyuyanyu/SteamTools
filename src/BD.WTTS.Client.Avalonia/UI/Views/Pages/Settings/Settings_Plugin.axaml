@@ -13,32 +13,42 @@
     x:CompileBindings="True"
     x:DataType="spp:SettingsPageViewModel"
     mc:Ignorable="d">
-    <StackPanel Margin="{StaticResource PageMargin}" Spacing="{StaticResource SettingsSpacing}">
+    <StackPanel Spacing="{StaticResource SettingsSpacing}">
         <TextBlock
             Margin="0,0,0,10"
-            Text="{ReflectionBinding Path=Res.Settings_Plugin,
-                                     Mode=OneWay,
-                                     Source={x:Static s:ResourceService.Current}}"
+            Text="{Binding Path=Res.Settings_Plugin, Mode=OneWay, Source={x:Static s:ResourceService.Current}}"
             Theme="{StaticResource SubtitleTextBlockStyle}" />
 
-        <ui:SettingsExpander Description="{ReflectionBinding Path=Res.Plugin_OnlyLoadOfficePlugins, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" Header="{ReflectionBinding Path=Res.Plugin_SafeMode, Mode=OneWay, Source={x:Static s:ResourceService.Current}}">
+        <ui:SettingsExpander Description="{Binding Path=Res.Plugin_OnlyLoadOfficePlugins, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" Header="{Binding Path=Res.Plugin_SafeMode, Mode=OneWay, Source={x:Static s:ResourceService.Current}}">
             <ui:SettingsExpander.IconSource>
                 <ui:FontIconSource FontFamily="Segoe Fluent Icons" Glyph="{StaticResource DefenderApp}" />
             </ui:SettingsExpander.IconSource>
             <ui:SettingsExpander.Footer>
-                <ToggleSwitch Classes="LeftContent" />
+                <ToggleSwitch Classes="LeftContent" IsChecked="{Binding Source={x:Static ms:GeneralSettings.PluginSafeMode}, Path=Value, Mode=TwoWay}" />
             </ui:SettingsExpander.Footer>
         </ui:SettingsExpander>
 
 
-        <TextBlock
-            Margin="0,10,0,5"
-            Text="{ReflectionBinding Path=Res.Plugin_InstalledPlugins,
-                                     Mode=OneWay,
-                                     Source={x:Static s:ResourceService.Current}}"
-            Theme="{StaticResource BodyStrongTextBlockStyle}" />
+        <TextBlock Margin="0,10,0,5" Theme="{StaticResource BodyStrongTextBlockStyle}">
+            <TextBlock.Text>
+                <MultiBinding StringFormat="{}{0}({1})">
+                    <CompiledBinding
+                        Mode="OneWay"
+                        Path="Res.Plugin_InstalledPlugins"
+                        Source="{x:Static s:ResourceService.Current}" />
+                    <CompiledBinding
+                        Mode="OneWay"
+                        Path="MainWindow2.PluginCount"
+                        Source="{x:Static s:IViewModelManager.Instance}" />
+                </MultiBinding>
+            </TextBlock.Text>
+            <!--<Run Text="{Binding Path=Res.Plugin_InstalledPlugins, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" />
+            <Run Text="(" />
+            <Run Text="{Binding MainWindow2.PluginCount, Mode=OneWay, Source={x:Static s:IViewModelManager.Instance}}" />
+            <Run Text=")" />-->
+        </TextBlock>
 
-        <ItemsControl ItemsSource="{Binding Plugins}">
+        <ItemsControl Classes="DraggableOrder" ItemsSource="{Binding Plugins}">
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                     <StackPanel Spacing="{StaticResource SettingsSpacing}" />
@@ -56,55 +66,49 @@
                         <ui:SettingsExpander.Footer>
                             <ToggleSwitch
                                 Classes="LeftContent"
-                                Command="{ReflectionBinding Path=DataContext.SwitchEnablePlugin_Click,
-                                                            RelativeSource={RelativeSource AncestorType=spp:Settings_Plugin}}"
+                                Command="{Binding $parent[spp:Settings_Plugin].((spp:SettingsPageViewModel)DataContext).SwitchEnablePlugin_Click}"
                                 CommandParameter="{Binding}"
                                 IsChecked="{Binding !IsDisable, Mode=TwoWay}" />
                         </ui:SettingsExpander.Footer>
                         <ui:SettingsExpanderItem
                             ActionIconSource="Refresh"
-                            Command="{ReflectionBinding Path=DataContext.CheckUpdate_Click,
-                                                        RelativeSource={RelativeSource AncestorType=spp:Settings_Plugin}}"
-                            Content="{ReflectionBinding Path=Res.CheckUpdate,
-                                                        Mode=OneWay,
-                                                        Source={x:Static s:ResourceService.Current}}"
+                            Command="{Binding $parent[spp:Settings_Plugin].((spp:SettingsPageViewModel)DataContext).CheckUpdate_Click}"
+                            Content="{Binding Path=Res.CheckUpdate, Mode=OneWay, Source={x:Static s:ResourceService.Current}}"
                             IsClickEnabled="True">
                             <ui:SettingsExpanderItem.Description>
                                 <MultiBinding StringFormat="{}{0}{1}">
-                                    <Binding
+                                    <CompiledBinding
                                         Mode="OneWay"
                                         Path="Res.Plugin_Version"
                                         Source="{x:Static s:ResourceService.Current}" />
-                                    <Binding Mode="OneWay" Path="Data.Version" />
+                                    <CompiledBinding Mode="OneWay" Path="Data.Version" />
                                 </MultiBinding>
                             </ui:SettingsExpanderItem.Description>
                         </ui:SettingsExpanderItem>
                         <ui:SettingsExpanderItem
                             ActionIconSource="Open"
-                            Command="{ReflectionBinding Path=DataContext.OpenPluginDirectory_Click,
-                                                        RelativeSource={RelativeSource AncestorType=spp:Settings_Plugin}}"
+                            Command="{Binding $parent[spp:Settings_Plugin].((spp:SettingsPageViewModel)DataContext).OpenPluginDirectory_Click}"
                             CommandParameter="{Binding Data.AssemblyLocation}"
-                            Content="{ReflectionBinding Path=Res.Plugin_OpenFolder,
-                                                        Mode=OneWay,
-                                                        Source={x:Static s:ResourceService.Current}}"
+                            Content="{Binding Path=Res.Plugin_OpenFolder, Mode=OneWay, Source={x:Static s:ResourceService.Current}}"
                             IsClickEnabled="True" />
                         <ui:SettingsExpanderItem
                             ActionIconSource="Open"
-                            Command="{ReflectionBinding Path=DataContext.OpenPluginCacheDirectory_Click,
-                                                        RelativeSource={RelativeSource AncestorType=spp:Settings_Plugin}}"
+                            Command="{Binding $parent[spp:Settings_Plugin].((spp:SettingsPageViewModel)DataContext).OpenPluginCacheDirectory_Click}"
+                            CommandParameter="{Binding Data.AppDataDirectory}"
+                            Content="{Binding Path=Res.Plugin_OpenAppDataFolder, Mode=OneWay, Source={x:Static s:ResourceService.Current}}"
+                            IsClickEnabled="True" />
+                        <ui:SettingsExpanderItem
+                            ActionIconSource="Open"
+                            Command="{Binding $parent[spp:Settings_Plugin].((spp:SettingsPageViewModel)DataContext).OpenPluginCacheDirectory_Click}"
                             CommandParameter="{Binding Data.CacheDirectory}"
-                            Content="{ReflectionBinding Path=Res.Plugin_OpenCacheFolder,
-                                                        Mode=OneWay,
-                                                        Source={x:Static s:ResourceService.Current}}"
+                            Content="{Binding Path=Res.Plugin_OpenCacheFolder, Mode=OneWay, Source={x:Static s:ResourceService.Current}}"
                             IsClickEnabled="True" />
                         <ui:SettingsExpanderItem
                             ActionIconSource="Delete"
-                            Command="{ReflectionBinding Path=DataContext.DeletePlugin_Click,
-                                                        RelativeSource={RelativeSource AncestorType=spp:Settings_Plugin}}"
+                            Command="{Binding $parent[spp:Settings_Plugin].((spp:SettingsPageViewModel)DataContext).DeletePlugin_Click}"
                             CommandParameter="{Binding Data}"
-                            Content="{ReflectionBinding Path=Res.Plugin_Delete,
-                                                        Mode=OneWay,
-                                                        Source={x:Static s:ResourceService.Current}}"
+                            Content="{Binding Path=Res.Plugin_Delete, Mode=OneWay, Source={x:Static s:ResourceService.Current}}"
+                            Foreground="{DynamicResource SystemFillColorCriticalBrush}"
                             IsClickEnabled="True" />
                     </ui:SettingsExpander>
                 </DataTemplate>
@@ -112,10 +116,10 @@
         </ItemsControl>
 
         <!--<ui:SettingsExpander
-            Description="{ReflectionBinding Path=Res.Plugin_ManageAllInstalledPlugins,
+            Description="{Binding Path=Res.Plugin_ManageAllInstalledPlugins,
                                             Mode=OneWay,
                                             Source={x:Static s:ResourceService.Current}}"
-            Header="{ReflectionBinding Path=Res.Plugin_InstalledPlugins,
+            Header="{Binding Path=Res.Plugin_InstalledPlugins,
                                        Mode=OneWay,
                                        Source={x:Static s:ResourceService.Current}}"
             IsExpanded="True"
@@ -124,7 +128,7 @@
                 <ui:SymbolIconSource Symbol="Calculator" />
             </ui:SettingsExpander.IconSource>
             <ui:SettingsExpander.Footer>
-                <Button Content="{ReflectionBinding Path=Res.Plugin_OpenFolder, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" />
+                <Button Content="{Binding Path=Res.Plugin_OpenFolder, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" />
             </ui:SettingsExpander.Footer>
             <ui:SettingsExpander.ItemTemplate>
                 <DataTemplate>
@@ -151,27 +155,27 @@
                                     Theme="{StaticResource TransparentButton}">
                                     <DropDownButton.Flyout>
                                         <MenuFlyout>
-                                            <MenuItem Command="{ReflectionBinding Path=DataContext.CheckUpdate_Click, RelativeSource={RelativeSource AncestorType=spp:Settings_Plugin}}" Header="{ReflectionBinding Path=Res.CheckUpdate, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" />
+                                            <MenuItem Command="{Binding Path=DataContext.CheckUpdate_Click, RelativeSource={RelativeSource AncestorType=spp:Settings_Plugin}}" Header="{Binding Path=Res.CheckUpdate, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" />
                                             <MenuItem
-                                                Command="{ReflectionBinding Path=DataContext.OpenPluginDirectory_Click,
+                                                Command="{Binding Path=DataContext.OpenPluginDirectory_Click,
                                                                             RelativeSource={RelativeSource AncestorType=spp:Settings_Plugin}}"
                                                 CommandParameter="{Binding Data.AssemblyLocation}"
-                                                Header="{ReflectionBinding Path=Res.Plugin_OpenFolder,
+                                                Header="{Binding Path=Res.Plugin_OpenFolder,
                                                                            Mode=OneWay,
                                                                            Source={x:Static s:ResourceService.Current}}" />
                                             <MenuItem
-                                                Command="{ReflectionBinding Path=DataContext.OpenPluginCacheDirectory_Click,
+                                                Command="{Binding Path=DataContext.OpenPluginCacheDirectory_Click,
                                                                             RelativeSource={RelativeSource AncestorType=spp:Settings_Plugin}}"
                                                 CommandParameter="{Binding Data.CacheDirectory}"
-                                                Header="{ReflectionBinding Path=Res.Plugin_OpenCacheFolder,
+                                                Header="{Binding Path=Res.Plugin_OpenCacheFolder,
                                                                            Mode=OneWay,
                                                                            Source={x:Static s:ResourceService.Current}}" />
                                             <MenuItem Header="-" />
                                             <MenuItem
-                                                Command="{ReflectionBinding Path=DataContext.DeletePlugin_Click,
+                                                Command="{Binding Path=DataContext.DeletePlugin_Click,
                                                                             RelativeSource={RelativeSource AncestorType=spp:Settings_Plugin}}"
                                                 CommandParameter="{Binding Data}"
-                                                Header="{ReflectionBinding Path=Res.Plugin_Delete,
+                                                Header="{Binding Path=Res.Plugin_Delete,
                                                                            Mode=OneWay,
                                                                            Source={x:Static s:ResourceService.Current}}" />
                                         </MenuFlyout>

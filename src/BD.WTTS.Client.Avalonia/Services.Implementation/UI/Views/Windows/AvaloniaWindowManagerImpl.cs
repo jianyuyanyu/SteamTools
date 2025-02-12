@@ -4,21 +4,9 @@ using System.Collections.Immutable;
 namespace BD.WTTS.Services.Implementation;
 
 /// <inheritdoc cref="IWindowManager"/>
-sealed class AvaloniaWindowManagerImpl : IWindowManagerImpl
+public sealed class AvaloniaWindowManagerImpl : IWindowManagerImpl
 {
     Type? IWindowManagerImpl.WindowType => typeof(Window);
-
-    object? GetPageContent(ViewModelBase viewModel)
-    {
-        return viewModel switch
-        {
-            DebugPageViewModel => new DebugPage(),
-            TextBoxWindowViewModel => new TextInputDialogPage(),
-            MessageBoxWindowViewModel => new MessageBoxPage(),
-            LoginOrRegisterWindowViewModel => new LoginOrRegisterPage(),
-            _ => null,
-        };
-    }
 
     public static TopLevel? GetWindowTopLevel()
     {
@@ -103,9 +91,11 @@ sealed class AvaloniaWindowManagerImpl : IWindowManagerImpl
         object? pageContent = null,
         string? okButtonText = null,
         string? retryButtonText = null,
-        Func<bool>? cancelCloseAction = null)
+        string? moreInfoText = null,
+        Func<bool>? cancelCloseAction = null,
+        bool disableScroll = false)
         where TPageViewModel : ViewModelBase
-    {
+  {
         var td = new TaskDialogEx
         {
             Title = title,
@@ -121,17 +111,29 @@ sealed class AvaloniaWindowManagerImpl : IWindowManagerImpl
             XamlRoot = GetWindowTopLevel(),
         };
 
+        if (td.XamlRoot == null)
+        {
+            Toast.LogAndShowT(new Exception("在 AppWindow 为 Null 时，无法弹出 Taskdialog."));
+            return false;
+        }
+
         if (viewModel != null)
         {
             if (viewModel is IWindowViewModel window)
             {
-                window.Close = () => td?.Hide(TaskDialogStandardResult.Close);
+                window.Close = b => td?.Hide(b ? TaskDialogStandardResult.OK : TaskDialogStandardResult.Close);
             }
+
             td.DataContext = viewModel;
-            td.Content = pageContent ?? GetPageContent(viewModel);
+            td.Content = pageContent ?? INavigationService.Instance.GetViewModelToPageContent(viewModel);
         }
 
-        if (isRememberChooseFooter)
+        if (!string.IsNullOrEmpty(moreInfoText))
+        {
+            td.FooterVisibility = TaskDialogFooterVisibility.Auto;
+            td.Footer = new TextBlock { Text = moreInfoText, TextWrapping = TextWrapping.Wrap };
+        }
+        else if (isRememberChooseFooter)
         {
             td.FooterVisibility = TaskDialogFooterVisibility.Always;
             td.Footer = new CheckBox { Content = Strings.RememberChooseNotToAskAgain, };
@@ -148,6 +150,10 @@ sealed class AvaloniaWindowManagerImpl : IWindowManagerImpl
         if (isCancelButton)
         {
             td.Buttons.Add(new TaskDialogButton(Strings.Cancel, TaskDialogStandardResult.Cancel));
+        }
+        if (disableScroll)
+        {
+            td.Classes.Add("disableScroll");
         }
         //td.DataTemplates.Add(new FuncDataTemplate<DebugPageViewModel>((x, _) => new DebugPage(), true));
 

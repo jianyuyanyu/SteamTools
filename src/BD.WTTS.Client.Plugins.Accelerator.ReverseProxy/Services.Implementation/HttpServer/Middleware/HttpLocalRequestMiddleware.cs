@@ -1,3 +1,4 @@
+using System.Net;
 using MediaTypeHeaderValue = System.Net.Http.Headers.MediaTypeHeaderValue;
 
 // ReSharper disable once CheckNamespace
@@ -96,14 +97,49 @@ sealed class HttpLocalRequestMiddleware
     {
         try
         {
-            if (string.IsNullOrEmpty(context.Request.QueryString.Value))
+            var url = context.Request.QueryString.Value;
+            if (string.IsNullOrEmpty(url))
+                return;
+            url = HttpUtility.UrlDecode(url.Replace("?request=", ""));
+            Uri requestUri;
+            try
+            {
+                requestUri = new Uri(url);
+            }
+            catch
+            {
+                return;
+            }
+
+            var method = context.Request.Method;
+            var methodObj = method switch
+            {
+                "GET" => HttpMethod.Get,
+                "PUT" => HttpMethod.Put,
+                "POST" => HttpMethod.Post,
+                "DELETE" => HttpMethod.Delete,
+                "HEAD" => HttpMethod.Head,
+                "OPTIONS" => HttpMethod.Options,
+                "TRACE" => HttpMethod.Trace,
+                "PATCH" => HttpMethod.Patch,
+                "CONNECT" => HttpMethod.Connect,
+                _ => TryParse(method),
+            };
+            if (methodObj == null)
                 return;
 
-            var url = HttpUtility.UrlDecode(context.Request.QueryString.Value.Replace("?request=", ""));
-            string? cookie = context.Request.Headers["cookie-steamTool"];
-            if (string.IsNullOrEmpty(cookie))
-                cookie = context.Request.Headers["Cookie"];
-            string? referer = context.Request.Headers["Referer-steamTool"];
+            static HttpMethod? TryParse(string method)
+            {
+                try
+                {
+                    return new HttpMethod(method.ToUpperInvariant());
+                }
+                catch
+                {
+
+                }
+                return null;
+            }
 
             context.Response.Headers.AccessControlAllowOrigin = context.Request.Headers.Origin.Count == 0 ? "*" : context.Request.Headers.Origin;
             context.Response.Headers.AccessControlAllowHeaders = "*";
@@ -119,28 +155,40 @@ sealed class HttpLocalRequestMiddleware
             async Task SendAsync()
             {
                 var method = context.Request.Method;
-                var hasContent = method != HttpMethods.Get && context.Request.ContentLength > 0;
+                var hasReqContent = !HttpMethods.IsGet(method) && context.Request.ContentLength > 0;
                 var req = new HttpRequestMessage
                 {
-                    RequestUri = new Uri(url),
-                    Method = new(method),
-                    Content = hasContent ? new StreamContent(context.Request.Body) : null,
+                    RequestUri = requestUri,
+                    Method = methodObj,
+                    Content = hasReqContent ? new StreamContent(context.Request.Body) : null,
                 };
-                req.Headers.UserAgent.ParseAdd(context.Request.Headers.UserAgent);
-                if (cookie != null)
+                foreach (var item in context.Request.Headers)
                 {
-                    CookieHttpClient.CookieContainer.Add(new Cookie
+                    var headers = item.Key.ToLower();
+                    if (headers.EndsWith("-steamtool"))
                     {
-                        CommentUri = req.RequestUri,
-                        Domain = req.RequestUri.Host,
-                        Value = cookie,
-                    });
-                    // req.Headers.Add("Cookie", cookie);
+
+                        if (headers.Equals("cookie", StringComparison.OrdinalIgnoreCase))
+                        {
+                            CookieHttpClient.CookieContainer.Add(new Cookie
+                            {
+                                CommentUri = requestUri,
+                                Domain = requestUri.Host,
+                                Value = item.Value
+                            });
+                        }
+                        if (headers.Equals("referer", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var refererUri = new Uri(item.Value.ToString());
+                            req.Headers.Referrer = refererUri;
+                        }
+                        req.Headers.TryAddWithoutValidation(item.Key.TrimEnd("-steamtool"), (IEnumerable<string?>)item.Value);
+                    }
                 }
-                if (referer != null) req.Headers.Referrer = new Uri(referer);
-                if (hasContent)
+                req.Headers.UserAgent.ParseAdd(context.Request.Headers.UserAgent);
+                if (hasReqContent)
                 {
-                    req.Content!.Headers.ContentType = MediaTypeHeaderValue.Parse(context.Request.ContentType);
+                    req.Content!.Headers.ContentType = MediaTypeHeaderValue.Parse(context.Request.ContentType.ThrowIsNull());
                     req.Content.Headers.ContentLength = context.Request.ContentLength;
                 }
                 var rsp = await HttpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted).ConfigureAwait(false);
@@ -157,12 +205,12 @@ sealed class HttpLocalRequestMiddleware
                 }
             }
 
-            if (context.Request.Method == HttpMethods.Get)
+            if (HttpMethods.IsGet(context.Request.Method))
             {
                 await SendAsync();
                 return;
             }
-            else if (context.Request.Method == HttpMethods.Post)
+            else if (HttpMethods.IsPost(context.Request.Method))
             {
                 if (context.Request.ContentLength > 0)
                 {

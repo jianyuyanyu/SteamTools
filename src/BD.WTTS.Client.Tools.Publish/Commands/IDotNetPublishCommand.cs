@@ -1,6 +1,11 @@
 using BD.WTTS.Client.Tools.Publish.Helpers;
+using System.Reflection;
+using System;
+using System.Security.Policy;
 using static BD.WTTS.Client.Tools.Publish.Helpers.DotNetCLIHelper;
 using static BD.WTTS.GlobalDllImportResolver;
+using JsonSerializer = System.Text.Json.JsonSerializer;
+using System.Runtime.InteropServices;
 
 namespace BD.WTTS.Client.Tools.Publish.Commands;
 
@@ -10,6 +15,16 @@ namespace BD.WTTS.Client.Tools.Publish.Commands;
 interface IDotNetPublishCommand : ICommand
 {
     const string commandName = "run";
+
+    const string EntryPointAssemblyName = "Steam++";
+
+    static string releaseTimestamp = DateTimeOffset.Now.ToString("yyMMdd_HHmmssfffffff");
+
+    static string GetPublishFileName(bool debug, string rid, string fileEx = "")
+    {
+        var value = $"[{(debug ? "Debug" : "Release")}] {EntryPointAssemblyName}_v{AssemblyInfo.InformationalVersion}_{rid.Replace('-', '_')}_{releaseTimestamp}{fileEx}";
+        return value;
+    }
 
     static bool GetDefForceSign()
     {
@@ -27,14 +42,16 @@ interface IDotNetPublishCommand : ICommand
     {
         var debug = new Option<bool>("--debug", "Defines the build configuration");
         var rids = new Option<string[]>("--rids", "RID is short for runtime identifier");
-        var force_sign = new Option<bool>("--force-sign", GetDefForceSign, "Mandatory verification must be digitally signed"); ;
+        var force_sign = new Option<bool>("--force-sign", GetDefForceSign, "Mandatory verification must be digitally signed");
+        var hsm_sign = new Option<bool>("--hsm-sign", "");
         var sha256 = new Option<bool>("--sha256", () => true, "Calculate file hash value");
         var sha384 = new Option<bool>("--sha384", () => true, "Calculate file hash value");
+        var stm_upload = new Option<bool>("--stm-upload", "Steam upload zip file");
         var command = new Command(commandName, "DotNet publish app")
         {
-           debug, rids, force_sign, sha256, sha384,
+           debug, rids, force_sign, sha256, sha384, stm_upload, hsm_sign,
         };
-        command.SetHandler(Handler, debug, rids, force_sign, sha256, sha384);
+        command.SetHandler(Handler, debug, rids, force_sign, sha256, sha384, stm_upload, hsm_sign);
         return command;
     }
 
@@ -55,184 +72,549 @@ interface IDotNetPublishCommand : ICommand
         }
     }
 
-    internal static void Handler(bool debug, string[] rids, bool force_sign, bool sha256, bool sha384)
+    const string DllSystemDrawingCommon = "System.Drawing.Common.dll";
+    const string DllMicrosoftWin32SystemEvents = "Microsoft.Win32.SystemEvents.dll";
+    const string DllSystemManagement = "System.Management.dll";
+    const string DllSplatDrawing = "Splat.Drawing.dll";
+    const string DllSystemReactive = "System.Reactive.dll";
+
+    static readonly Lazy<string> nugetPkgPath = new(() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".nuget",
+            "packages"));
+
+    static string GetMatchTfmDir(string dllPath)
     {
-        foreach (var rid in rids)
+        var versions = from m in Directory.GetDirectories(dllPath)
+                       let dirName = Path.GetFileName(m)
+                       let ver = Version.TryParse(dirName.TrimStart("net"), out var ver_) ? ver_ : null
+                       where ver != null && ver.Major <= Environment.Version.Major
+                       orderby ver descending
+                       select (ver, m);
+        var path = versions.FirstOrDefault().m;
+        return path;
+    }
+
+    static bool MatchPackageVersion(string dllName, Version ver, FileVersionInfo? fvi = null) => dllName switch
+    {
+        DllSystemDrawingCommon => ver.Major <= Environment.Version.Major,
+        _ => fvi == null || (!Version.TryParse(fvi.FileVersion, out var fVer) || (ver.Major <= fVer.Major)),
+    };
+
+    static void CopyWindowsDlls(string publishDir)
+    {
+        // 修复：存在 Microsoft.WindowsDesktop.App 依赖时不会将 System.Drawing.Common.dll 复制到输出目录
+        string[] copyToDlls = [DllSystemDrawingCommon, DllMicrosoftWin32SystemEvents, DllSystemManagement];
+        foreach (var copyToDll in copyToDlls)
         {
-            var info = DeconstructRuntimeIdentifier(rid);
-            if (info == default) continue;
-
-            bool isWindows = false;
-            switch (info.Platform)
+            var dllExistsPath = Path.Combine(publishDir, copyToDll);
+            if (!File.Exists(dllExistsPath))
             {
-                case Platform.Windows:
-                case Platform.UWP:
-                case Platform.WinUI:
-                    isWindows = true;
-                    break;
+                var pkgDir = Path.Combine(nugetPkgPath.Value, copyToDll.TrimEnd(".dll", StringComparison.OrdinalIgnoreCase));
+                var versions = from m in Directory.GetDirectories(pkgDir)
+                               let dirName = Path.GetFileName(m)
+                               let ver = Version.TryParse(dirName, out var ver_) ? ver_ : null
+                               where ver != null && MatchPackageVersion(copyToDll, ver)
+                               orderby ver descending
+                               select (ver, m);
+                var path = versions.FirstOrDefault().m;
+                var dllPath = Path.Combine(path, "lib");
+                dllPath = GetMatchTfmDir(dllPath);
+                dllPath = Path.Combine(dllPath, copyToDll);
+                File.Copy(dllPath, dllExistsPath);
             }
-
-            var projRootPath = ProjectPath_AvaloniaApp;
-            var psi = GetProcessStartInfo(projRootPath);
-            var arg = SetPublishCommandArgumentList(psi.ArgumentList, debug, info.Platform, info.DeviceIdiom, info.Architecture);
-            Console.Write("[");
-            Console.Write(rid);
-            Console.Write("] dotnet ");
-            Console.WriteLine(string.Join(' ', psi.ArgumentList));
-
-            var publishDir = Path.Combine(projRootPath, arg.PublishDir);
-            var rootPublishDir = Path.GetFullPath(Path.Combine(publishDir, ".."));
-            DirTryDelete(rootPublishDir);
-
-            // 发布主体
-            StartProcessAndWaitForExit(psi);
-
-            // 验证 Avalonia.Base.dll 版本号必须为 11+
-            var avaloniaBaseDllPath = Path.Combine(publishDir, "Avalonia.Base.dll");
-            var avaloniaBaseDllVersion = Version.Parse(FileVersionInfo.GetVersionInfo(avaloniaBaseDllPath).FileVersion!);
-            if (avaloniaBaseDllVersion < new Version(11, 0))
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(avaloniaBaseDllVersion),
-                    avaloniaBaseDllVersion, null);
-            }
-
-            // 删除 CreateDump
-            RemoveCreateDump(publishDir);
-
-            // 移动本机库
-            MoveNativeLibrary(publishDir, arg.RuntimeIdentifier, info.Platform);
-
-            // 处理 json 文件
-            var runtimeconfigjsonpath = Path.Combine(publishDir, runtimeconfigjsonfilename);
-            ILaunchAppTestCommand.HandlerJsonFiles(runtimeconfigjsonpath, info.Platform);
-
-            // 发布 apphost
-            PublishAppHost(publishDir, info.Platform, debug);
-
-            // 发布插件
-            PublishPlugins(debug, info.Platform, info.Architecture, publishDir, arg.Configuration, arg.Framework);
-
-            // 复制运行时
-            CopyRuntime(rootPublishDir, isWindows, info.Architecture);
-
-            var appPublish = new AppPublishInfo()
-            {
-                DeploymentMode = DeploymentMode.SCD,
-                RuntimeIdentifier = arg.RuntimeIdentifier,
-                DirectoryPath = rootPublishDir,
-            };
-
-            IOPath.DirTryDelete(Path.Combine(rootPublishDir, IOPath.DirName_AppData));
-            IOPath.DirTryDelete(Path.Combine(rootPublishDir, IOPath.DirName_Cache));
-
-            IScanPublicDirectoryCommand.ScanPathCore(appPublish.DirectoryPath,
-                appPublish.Files,
-                ignoreRootDirNames: ignoreDirNames);
-
-            if (sha256)
-            {
-                foreach (var item in appPublish.Files)
-                {
-                    using var fileStream = File.OpenRead(item.FilePath);
-                    item.SHA256 = Hashs.String.SHA256(fileStream);
-                }
-            }
-            if (sha384)
-            {
-                foreach (var item in appPublish.Files)
-                {
-                    using var fileStream = File.OpenRead(item.FilePath);
-                    item.SHA384 = Hashs.String.SHA384(fileStream);
-                }
-            }
-
-            if (OperatingSystem.IsWindows() && isWindows)
-            {
-                // 数字签名
-                List<AppPublishFileInfo> toBeSignedFiles = new();
-                HashSet<string> toBeSignedFilePaths = new();
-                foreach (var item in appPublish.Files!)
-                {
-                    switch (item.FileEx.ToLowerInvariant())
-                    {
-                        case ".dll" or ".exe" or ".sys":
-                            if (!MSIXHelper.IsDigitalSigned(item.FilePath))
-                            {
-                                toBeSignedFiles.Add(item);
-                                toBeSignedFilePaths.Add(item.FilePath);
-                            }
-                            break;
-                    }
-                }
-
-                if (toBeSignedFilePaths.Any())
-                {
-                    Console.WriteLine($"正在进行数字签名，文件数量：{toBeSignedFilePaths.Count}");
-                    var fileNames = string.Join(' ', toBeSignedFilePaths.Select(x =>
-$"""
-"{x}"
-"""));
-                    MSIXHelper.SignTool.Start(force_sign, fileNames);
-                    foreach (var item in toBeSignedFiles)
-                    {
-                        if (sha256)
-                        {
-                            using var fileStream = File.OpenRead(item.FilePath);
-                            item.SignatureSHA256 = Hashs.String.SHA256(fileStream);
-                        }
-                        if (sha384)
-                        {
-                            using var fileStream = File.OpenRead(item.FilePath);
-                            item.SignatureSHA384 = Hashs.String.SHA384(fileStream);
-                        }
-                    }
-                }
-
-                // 打包资源 images
-                MSIXHelper.MakePri.Start(rootPublishDir);
-                // 生成 msix 包
-                MSIXHelper.MakeAppx.Start(rootPublishDir, GetVersion(), info.Architecture);
-                Thread.Sleep(TimeSpan.FromSeconds(1.2d));
-                // 签名 msix 包
-                var msixFilePath = $"{rootPublishDir}.msix";
-                // msix 签名证书名必须与包名一致
-                MSIXHelper.SignTool.Start(force_sign, $"\"{msixFilePath}\"", MSIXHelper.SignTool.pfxFilePath_MSStore_CodeSigning);
-
-                using var msixFileStream = File.OpenRead(msixFilePath);
-
-                var msixInfo = new AppPublishFileInfo
-                {
-                    FileEx = ".msix",
-                    FilePath = msixFilePath,
-                    Length = msixFileStream.Length,
-                    SignatureSHA384 = Hashs.String.SHA384(msixFileStream),
-                };
-                appPublish.SingleFile.Add(CloudFileType.Msix, msixInfo);
-            }
-
-            var jsonFilePath = $"{rootPublishDir}.json";
-            using var jsonFileStream = File.Open(jsonFilePath, FileMode.OpenOrCreate);
-            JsonSerializer.Serialize(jsonFileStream, appPublish, new AppPublishInfoContext(new JsonSerializerOptions
-            {
-                WriteIndented = true,
-                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-            }).AppPublishInfo);
-            jsonFileStream.Flush();
-            jsonFileStream.SetLength(jsonFileStream.Position);
-
-            Console.WriteLine(jsonFilePath);
         }
 
-        Console.WriteLine("OK");
+        // 修复：Splat.Drawing 包存在 WPF 的依赖项
+        // 修复：System.Reactive 包存在 System.Windows.Forms 的依赖项
+        string[] replaceToDlls = [DllSplatDrawing, DllSystemReactive];
+        foreach (var replaceToDll in replaceToDlls)
+        {
+            var dllExistsPath = Path.Combine(publishDir, replaceToDll);
+            if (File.Exists(dllExistsPath))
+            {
+                var fvi = FileVersionInfo.GetVersionInfo(dllExistsPath);
+                var pkgDir = Path.Combine(nugetPkgPath.Value, replaceToDll.TrimEnd(".dll", StringComparison.OrdinalIgnoreCase));
+                var versions = from m in Directory.GetDirectories(pkgDir)
+                               let dirName = Path.GetFileName(m)
+                               let ver = Version.TryParse(dirName, out var ver_) ? ver_ : null
+                               where ver != null && MatchPackageVersion(replaceToDll, ver, fvi)
+                               orderby ver descending
+                               select (ver, m);
+                var path = versions.FirstOrDefault().m;
+                var dllPath = Path.Combine(path, "lib");
+                dllPath = GetMatchTfmDir(dllPath);
+                dllPath = Path.Combine(dllPath, replaceToDll);
+                File.Delete(dllExistsPath);
+                File.Copy(dllPath, dllExistsPath);
+            }
+        }
     }
 
-    static string GetVersion()
+    internal static void Handler(bool debug, string[] rids, bool force_sign, bool sha256, bool sha384, bool stm_upload, bool hsm_sign)
     {
-        var v = new Version(AssemblyInfo.Version);
+        if (ProjectUtils.ProjPath.Contains("actions-runner"))
+        {
+            hsm_sign = false; // hsm 目前无法映射到 CI VM 中
+        }
+
+        var bgOriginalColor = Console.BackgroundColor;
+        var fgOriginalColor = Console.ForegroundColor;
+
+        void ResetConsoleColor()
+        {
+            Console.BackgroundColor = bgOriginalColor;
+            Console.ForegroundColor = fgOriginalColor;
+        }
+        void SetConsoleColor(ConsoleColor foregroundColor, ConsoleColor backgroundColor)
+        {
+            Console.BackgroundColor = backgroundColor;
+            Console.ForegroundColor = foregroundColor;
+        }
+
+        try
+        {
+            foreach (var rid in rids)
+            {
+                var info = DeconstructRuntimeIdentifier(rid);
+                if (info == default) continue;
+
+                bool isWindows = false;
+                bool isCopyRuntime = false;
+                switch (info.Platform)
+                {
+                    case Platform.Windows:
+                    case Platform.UWP:
+                    case Platform.WinUI:
+                        isWindows = true;
+                        isCopyRuntime = true;
+                        break;
+                    case Platform.Linux:
+                        isCopyRuntime = true;
+                        break;
+                }
+
+                var isWinArm64 = isWindows && info.Architecture == Architecture.Arm64;
+
+                var projRootPath = ProjectPath_AvaloniaApp;
+                var psi = GetProcessStartInfo(projRootPath);
+                var arg = SetPublishCommandArgumentList(debug, info.Platform, info.DeviceIdiom, info.Architecture);
+                if (isWinArm64) // win-arm64
+                {
+                    // steamclient.dll 缺少 Arm64，以及 Arm64EC 在 dotnet 中目前不可用
+                    // 更改为 x64 兼容运行主进程
+                    arg.RuntimeIdentifier = "win-x64";
+                    arg.PublishDir = arg.PublishDir.Replace("win-x64", "win-arm64");
+                }
+                SetPublishCommandArgumentList(psi.ArgumentList, arg);
+
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkMagenta);
+                Console.Write("[");
+                Console.Write(rid);
+                Console.Write("] dotnet ");
+                Console.WriteLine(string.Join(' ', psi.ArgumentList));
+                ResetConsoleColor();
+
+                var publishDir = Path.Combine(projRootPath, arg.PublishDir);
+                Console.WriteLine(publishDir);
+                var rootPublishDir = Path.GetFullPath(Path.Combine(publishDir, ".."));
+                //switch (info.Platform)
+                //{
+                //    case Platform.Linux:
+                //        rootPublishDir = Path.GetFullPath(publishDir);
+                //        break;
+                //}
+                DirTryDelete(rootPublishDir);
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkMagenta);
+                Console.Write("已删除目录：");
+                Console.WriteLine(rootPublishDir);
+                ResetConsoleColor();
+
+                // 发布主体
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkMagenta);
+                Console.WriteLine("开始发布【主项目】");
+                ResetConsoleColor();
+                ProcessHelper.StartAndWaitForExit(psi);
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                Console.WriteLine("发布成功【主项目】");
+                ResetConsoleColor();
+
+                // 验证 Avalonia.Base.dll 版本号必须为 11+
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkMagenta);
+                Console.WriteLine("开始验证【Avalonia.Base.dll 版本号必须为 11+】");
+                ResetConsoleColor();
+                if (arg.SingleFile.HasValue && !arg.SingleFile.Value)
+                {
+                    var avaloniaBaseDllPath = Path.Combine(publishDir, "Avalonia.Base.dll");
+                    var avaloniaBaseDllVersion = Version.Parse(FileVersionInfo.GetVersionInfo(avaloniaBaseDllPath).FileVersion!);
+                    if (avaloniaBaseDllVersion < new Version(11, 0))
+                    {
+                        throw new ArgumentOutOfRangeException(
+                            nameof(avaloniaBaseDllVersion),
+                            avaloniaBaseDllVersion, null);
+                    }
+                }
+
+                if (info.Platform == Platform.Linux)
+                {
+                    Console.WriteLine("Linux 需要 Ico 导入系统图标");
+                    var ico_path = Path.Combine(ProjectUtils.ProjPath, "res", "icons", "app", "v3", "Logo_512.png");
+                    var save_dir_path = Path.Combine(rootPublishDir, "Icons");
+                    if (File.Exists(ico_path))
+                    {
+                        IOPath.DirCreateByNotExists(save_dir_path);
+                        // 不能使用下划线
+                        File.Copy(ico_path, Path.Combine(save_dir_path, "Watt-Toolkit.png"), true);
+                    }
+                    Console.WriteLine("Linux 复制启动 环境检查 卸载脚本");
+                    var script_path = Path.Combine(rootPublishDir, "..", "ShellScript", "Linux");//Path.Combine(ProjectUtils.ProjPath, "build", "linux");
+                    CopyDirectory(script_path, Path.Combine(rootPublishDir, "script"), true);
+                    File.Move(Path.Combine(rootPublishDir, "script", "Steam++.sh"), Path.Combine(rootPublishDir, "Steam++.sh"));
+                }
+
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                Console.WriteLine("验证成功【Avalonia.Base.dll 版本号必须为 11+】");
+                ResetConsoleColor();
+
+                // 删除 CreateDump
+                RemoveCreateDump(publishDir);
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                Console.WriteLine("已删除 CreateDump");
+                ResetConsoleColor();
+
+                // 移动本机库
+                MoveNativeLibrary(publishDir, arg.RuntimeIdentifier, info.Platform);
+                if (isWinArm64)
+                {
+                    // 删除相关文件来禁用 DNS 驱动模式，该驱动不支持 Arm64
+                    var nativeDir = Path.Combine(publishDir, "..", "native", "win-x64");
+                    foreach (var item in Directory.GetFiles(nativeDir, "WinDivert*"))
+                    {
+                        IOPath.FileTryDelete(item);
+                    }
+                }
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                Console.WriteLine("移动本机库");
+                ResetConsoleColor();
+
+                // 处理 json 文件
+                var runtimeconfigjsonpath = Path.Combine(publishDir, runtimeconfigjsonfilename);
+                ILaunchAppTestCommand.HandlerJsonFiles(runtimeconfigjsonpath, info.Platform);
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                Console.WriteLine("已处理 json 文件");
+                ResetConsoleColor();
+
+                if (isWindows)
+                {
+                    // 发布 apphost
+                    SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkMagenta);
+                    Console.WriteLine("开始发布【AppHost】");
+                    ResetConsoleColor();
+                    PublishAppHost(publishDir, info.Platform, debug);
+                    SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                    Console.WriteLine("发布成功【AppHost】");
+                    ResetConsoleColor();
+
+                    CopyWindowsDlls(publishDir);
+                }
+
+                // 发布插件
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkMagenta);
+                Console.WriteLine("开始发布【插件】");
+                ResetConsoleColor();
+                PublishPlugins(debug, info.Platform, info.Architecture, publishDir, arg.Configuration, arg.Framework);
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                Console.WriteLine("发布成功【插件】");
+                ResetConsoleColor();
+
+                // 复制运行时
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkMagenta);
+                Console.WriteLine("开始复制运行时");
+                ResetConsoleColor();
+                CopyRuntime(rootPublishDir, info.Platform, isCopyRuntime, info.Architecture);
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                Console.WriteLine("完成复制运行时");
+                ResetConsoleColor();
+
+                var appPublish = new AppPublishInfo()
+                {
+                    DeploymentMode = DeploymentMode.SCD,
+                    RuntimeIdentifier = arg.RuntimeIdentifier,
+                    DirectoryPath = rootPublishDir,
+                };
+
+                IOPath.DirTryDelete(Path.Combine(rootPublishDir, IOPath.DirName_AppData));
+                IOPath.DirTryDelete(Path.Combine(rootPublishDir, IOPath.DirName_Cache));
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                Console.WriteLine("已删除 AppData/Cache");
+                ResetConsoleColor();
+
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkMagenta);
+                Console.WriteLine("开始扫描文件");
+                ResetConsoleColor();
+                IScanPublicDirectoryCommand.ScanPathCore(appPublish.DirectoryPath,
+                    appPublish.Files,
+                    ignoreRootDirNames: ignoreDirNames);
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                Console.WriteLine("完成扫描文件");
+                ResetConsoleColor();
+
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkMagenta);
+                Console.WriteLine("开始文件计算哈希值");
+                ResetConsoleColor();
+                if (sha256)
+                {
+                    foreach (var item in appPublish.Files)
+                    {
+                        using var fileStream = File.OpenRead(item.FilePath);
+                        item.SHA256 = Hashs.String.SHA256(fileStream);
+                    }
+                }
+                if (sha384)
+                {
+                    foreach (var item in appPublish.Files)
+                    {
+                        using var fileStream = File.OpenRead(item.FilePath);
+                        item.SHA384 = Hashs.String.SHA384(fileStream);
+                    }
+                }
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                Console.WriteLine("完成文件计算哈希值");
+                ResetConsoleColor();
+
+                if (OperatingSystem.IsWindows() && isWindows)
+                {
+                    // 数字签名
+                    List<AppPublishFileInfo> toBeSignedFiles = new();
+                    HashSet<string> toBeSignedFilePaths = new();
+                    foreach (var item in appPublish.Files!)
+                    {
+                        switch (item.FileEx.ToLowerInvariant())
+                        {
+                            case ".dll" or ".exe" or ".sys":
+                                {
+                                    if (item.FileInfo?.Name.Contains("xunyoucall",
+                                        StringComparison.OrdinalIgnoreCase) ?? false)
+                                    {
+                                        continue;
+                                    }
+                                    if (!MSIXHelper.IsDigitalSigned(item.FilePath))
+                                    {
+                                        toBeSignedFiles.Add(item);
+                                        toBeSignedFilePaths.Add(item.FilePath);
+                                    }
+                                }
+                                break;
+                        }
+                    }
+
+                    if (toBeSignedFilePaths.Count != 0)
+                    {
+                        SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkMagenta);
+                        Console.Write("正在进行数字签名，文件数量：");
+                        Console.WriteLine(toBeSignedFilePaths.Count);
+                        ResetConsoleColor();
+                        var fileNames = string.Join(' ', toBeSignedFilePaths.Select(x =>
+$"""
+"{x.TrimStart(Path.DirectorySeparatorChar).TrimStart(rootPublishDir).TrimStart(Path.DirectorySeparatorChar)}"
+"""));
+                        if (!debug) // 调试模式不进行数字签名
+                        {
+                            var pfxFilePath = hsm_sign ? MSIXHelper.SignTool.pfxFilePath_HSM_CodeSigning : null;
+                            try
+                            {
+                                MSIXHelper.SignTool.Start(force_sign, fileNames, pfxFilePath, rootPublishDir);
+                            }
+                            catch
+                            {
+                                Console.WriteLine("数字签名失败，输入回车使用自签继续");
+                                Console.ReadLine();
+                                if (debug)
+                                    throw;
+                                MSIXHelper.SignTool.Start(force_sign, fileNames, MSIXHelper.SignTool.pfxFilePath_BeyondDimension_CodeSigning, rootPublishDir);
+                            }
+                        }
+                        foreach (var item in toBeSignedFiles)
+                        {
+                            if (sha256)
+                            {
+                                using var fileStream = File.OpenRead(item.FilePath);
+                                item.SignatureSHA256 = Hashs.String.SHA256(fileStream);
+                            }
+                            if (sha384)
+                            {
+                                using var fileStream = File.OpenRead(item.FilePath);
+                                item.SignatureSHA384 = Hashs.String.SHA384(fileStream);
+                            }
+                        }
+                    }
+
+                    SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkMagenta);
+                    Console.WriteLine("开始生成【MSIX 包】");
+                    ResetConsoleColor();
+                    // 生成清单文件
+                    MSIXHelper.MakeAppx.GenerateAppxManifestXml(rootPublishDir, AppVersion4, info.Architecture);
+
+                    // 打包资源 images
+                    MSIXHelper.MakePri.Start(rootPublishDir);
+
+                    var msixDir = $"{rootPublishDir}_MSIX";
+                    IOPath.DirCreateByNotExists(msixDir);
+                    var msixFilePath = Path.Combine(msixDir, GetPublishFileName(debug, rid, ".msix"));
+
+                    // 生成 msix 包
+                    MSIXHelper.MakeAppx.Start(msixFilePath, rootPublishDir, AppVersion4, info.Architecture);
+                    Thread.Sleep(TimeSpan.FromSeconds(1.15d));
+
+                    // 签名 msix 包
+                    // msix 签名证书名必须与包名一致
+                    MSIXHelper.SignTool.Start(force_sign, $"\"{msixFilePath}\"", MSIXHelper.SignTool.pfxFilePath_MSStore_CodeSigning);
+
+                    var msixBundleFilePath = $"{rootPublishDir}.msixbundle";
+                    MSIXHelper.MakeAppx.StartBundle(msixBundleFilePath, msixDir, AppVersion4);
+                    Thread.Sleep(TimeSpan.FromSeconds(1.15d));
+
+                    // 签名 msix 包
+                    // msix 签名证书名必须与包名一致
+                    MSIXHelper.SignTool.Start(force_sign, $"\"{msixBundleFilePath}\"", MSIXHelper.SignTool.pfxFilePath_MSStore_CodeSigning);
+
+                    using var msixFileStream = File.OpenRead(msixBundleFilePath);
+
+                    var msixInfo = new AppPublishFileInfo
+                    {
+                        FileEx = ".msixbundle",
+                        FilePath = msixBundleFilePath,
+                        Length = msixFileStream.Length,
+                        SignatureSHA384 = Hashs.String.SHA384(msixFileStream),
+                    };
+                    appPublish.SingleFile.Add(CloudFileType.MsixBundle, msixInfo);
+
+                    SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                    Console.Write("已生成【MSIX 包】，文件大小：");
+                    Console.Write(IOPath.GetDisplayFileSizeString(msixInfo.Length));
+                    Console.Write("，路径：");
+                    Console.WriteLine(msixFilePath);
+                    ResetConsoleColor();
+                }
+
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkMagenta);
+                Console.WriteLine("开始创建【压缩包】");
+                ResetConsoleColor();
+                string? packPath = null;
+                string GetPackPathWithTryDelete(string fileEx)
+                {
+                    var packPath = $"{rootPublishDir}{fileEx}";
+                    IOPath.FileTryDelete(packPath);
+                    return packPath;
+                }
+                switch (info.Platform)
+                {
+                    case Platform.Windows:
+                    case Platform.UWP:
+                    case Platform.WinUI:
+                    case Platform.Apple:
+                        ICompressedPackageCommand.CreateSevenZipPack(packPath = GetPackPathWithTryDelete(FileEx._7Z), appPublish.Files);
+                        break;
+                    case Platform.Linux:
+                        ICompressedPackageCommand.CreateGZipPack(packPath = GetPackPathWithTryDelete(FileEx.TAR_GZ), appPublish.Files);
+                        break;
+                }
+                if (stm_upload)
+                {
+                    List<AppPublishFileInfo> mainFiles = new();
+                    List<AppPublishFileInfo> modulesFiles = new();
+                    List<AppPublishFileInfo> stmUploads = new();
+                    foreach (var item in appPublish.Files)
+                    {
+                        if (item.RelativePath.Contains("modules"))
+                        {
+                            modulesFiles.Add(item);
+                        }
+                        else
+                        {
+                            mainFiles.Add(item);
+                        }
+                    }
+                    var stmupload_main_zip_path = GetPackPathWithTryDelete("_Main.stmupload.zip");
+                    stmUploads.Add(new()
+                    {
+                        FilePath = stmupload_main_zip_path,
+                        RelativePath = Path.GetFileName(stmupload_main_zip_path),
+                    });
+                    ICompressedPackageCommand.CreateZipPack(stmupload_main_zip_path, mainFiles);
+
+                    var query = from module in modulesFiles
+                                let split = module.RelativePath.Split(new char[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries)
+                                let name = split.Length >= 2 ? split[1] : null
+                                where name != null
+                                group module by name;
+                    var items = query.ToArray();
+                    foreach (var item in items)
+                    {
+                        if (string.IsNullOrWhiteSpace(item.Key))
+                            continue;
+                        var files = item.ToArray();
+                        var stmupload_item_zip_path = GetPackPathWithTryDelete($"_{item.Key}.stmupload.zip");
+                        stmUploads.Add(new()
+                        {
+                            FilePath = stmupload_item_zip_path,
+                            RelativePath = Path.GetFileName(stmupload_item_zip_path),
+                        });
+                        ICompressedPackageCommand.CreateZipPack(stmupload_item_zip_path, files);
+                    }
+                    ICompressedPackageCommand.CreateZipPack(GetPackPathWithTryDelete(".stmupload.zip"), stmUploads);
+                }
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                Console.Write("创建成功【压缩包】，文件大小：");
+                if (packPath != null)
+                {
+                    Console.Write(IOPath.GetDisplayFileSizeString(new FileInfo(packPath).Length));
+                }
+                else
+                {
+                    Console.Write(0);
+                }
+                Console.Write("，路径：");
+                Console.WriteLine(packPath);
+                ResetConsoleColor();
+
+                var jsonFilePath = $"{rootPublishDir}.json";
+                using var jsonFileStream = File.Open(jsonFilePath, FileMode.OpenOrCreate);
+                JsonSerializer.Serialize(jsonFileStream, appPublish, new AppPublishInfoContext(new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                }).AppPublishInfo);
+                jsonFileStream.Flush();
+                jsonFileStream.SetLength(jsonFileStream.Position);
+
+                SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+                Console.Write("发布文件信息清单已生成，文件大小：");
+                Console.Write(IOPath.GetDisplayFileSizeString(appPublish.Files.Sum(x => x.Length)));
+                Console.Write("，路径：");
+                Console.WriteLine(jsonFilePath);
+                ResetConsoleColor();
+            }
+
+            SetConsoleColor(ConsoleColor.White, ConsoleColor.DarkGreen);
+            Console.WriteLine("OK");
+            ResetConsoleColor();
+        }
+        finally
+        {
+            ResetConsoleColor();
+        }
+    }
+
+    private static readonly Lazy<string> _AppVersion4 = new(() =>
+    {
+        var v = new Version(AssemblyInfo.FileVersion);
         static int GetInt32(int value) => value < 0 ? 0 : value;
         return $"{GetInt32(v.Major)}.{GetInt32(v.Minor)}.{GetInt32(v.Build)}.{GetInt32(v.Revision)}";
-    }
+    });
+
+    static string AppVersion4 => _AppVersion4.Value;
 
     /// <summary>
     /// 将运行时复制到发布根目录下
@@ -240,60 +622,81 @@ $"""
     /// <param name="rootPublishDir"></param>
     /// <param name="isWindows"></param>
     /// <param name="architecture"></param>
-    static void CopyRuntime(string rootPublishDir, bool isWindows, Architecture architecture)
+    static void CopyRuntime(string rootPublishDir, Platform platform, bool isCopyRuntime, Architecture architecture)
     {
-        if (OperatingSystem.IsWindows() && isWindows)
+        switch (platform)
         {
-            if (architecture == Architecture.Arm64 &&
-                RuntimeInformation.OSArchitecture != Architecture.Arm64)
-            {
-                // TODO
-            }
+            case Platform.UWP:
+            case Platform.WinUI:
+            case Platform.Windows:
+                if (isCopyRuntime)
+                {
+                    //if (architecture == Architecture.Arm64 &&
+                    //    RuntimeInformation.OSArchitecture != Architecture.Arm64)
+                    //{
+                    //    // TODO
+                    //    return;
+                    //}
 
-            var programFiles = Environment.GetFolderPath(
-                architecture == Architecture.X86 ?
-                Environment.SpecialFolder.ProgramFilesX86 :
-                Environment.SpecialFolder.ProgramFiles);
+                    var programFiles = Environment.GetFolderPath(
+                        architecture == Architecture.X86 ?
+                        Environment.SpecialFolder.ProgramFilesX86 :
+                        Environment.SpecialFolder.ProgramFiles);
 
-            static string get_hostfxr_path(string rootPath) => Path.Combine(rootPath,
-                "dotnet",
-                "host",
-                "fxr",
-                $"{Environment.Version.Major}.{Environment.Version.Minor}.{Environment.Version.Build}",
-                "hostfxr.dll");
+                    static string get_hostfxr_path(string rootPath) => Path.Combine(rootPath,
+                        "dotnet",
+                        "host",
+                        "fxr",
+                        $"{Environment.Version.Major}.{Environment.Version.Minor}.{Environment.Version.Build}",
+                        "hostfxr.dll");
 
-            var hostfxr_path = get_hostfxr_path(programFiles);
+                    var hostfxr_path = get_hostfxr_path(programFiles);
 
-            static string get_aspnetcore_path(string rootPath) => Path.Combine(rootPath,
-                "dotnet",
-                "shared",
-                "Microsoft.AspNetCore.App",
-                $"{Environment.Version.Major}.{Environment.Version.Minor}.{Environment.Version.Build}");
+                    static string get_aspnetcore_path(string rootPath) => Path.Combine(rootPath,
+                        "dotnet",
+                        "shared",
+                        "Microsoft.AspNetCore.App",
+                        $"{Environment.Version.Major}.{Environment.Version.Minor}.{Environment.Version.Build}");
 
-            var aspnetcore_path = get_aspnetcore_path(programFiles);
+                    var aspnetcore_path = get_aspnetcore_path(programFiles);
 
-            static string get_netcore_path(string rootPath) => Path.Combine(rootPath,
-                "dotnet",
-                "shared",
-                "Microsoft.NETCore.App",
-                $"{Environment.Version.Major}.{Environment.Version.Minor}.{Environment.Version.Build}");
+                    static string get_win_desktop_path(string rootPath) => Path.Combine(rootPath,
+                        "dotnet",
+                        "shared",
+                        "Microsoft.WindowsDesktop.App",
+                        $"{Environment.Version.Major}.{Environment.Version.Minor}.{Environment.Version.Build}");
 
-            var netcore_path = get_netcore_path(programFiles);
+                    var win_desktop_path = get_win_desktop_path(programFiles);
 
-            if (Directory.Exists(netcore_path) &&
-                Directory.Exists(aspnetcore_path) &&
-                File.Exists(hostfxr_path))
-            {
-                var dest_hostfxr_path = get_hostfxr_path(rootPublishDir);
-                IOPath.DirCreateByNotExists(Path.GetDirectoryName(dest_hostfxr_path)!);
-                File.Copy(hostfxr_path, dest_hostfxr_path);
-                CopyDirectory(netcore_path, get_netcore_path(rootPublishDir), true);
-                CopyDirectory(aspnetcore_path, get_aspnetcore_path(rootPublishDir), true);
-            }
-        }
-        else
-        {
-            // TODO
+                    static string get_netcore_path(string rootPath) => Path.Combine(rootPath,
+                        "dotnet",
+                        "shared",
+                        "Microsoft.NETCore.App",
+                        $"{Environment.Version.Major}.{Environment.Version.Minor}.{Environment.Version.Build}");
+
+                    var netcore_path = get_netcore_path(programFiles);
+
+                    if (Directory.Exists(netcore_path) &&
+                        Directory.Exists(aspnetcore_path) &&
+                        File.Exists(hostfxr_path))
+                    {
+                        var dest_hostfxr_path = get_hostfxr_path(rootPublishDir);
+                        IOPath.DirCreateByNotExists(Path.GetDirectoryName(dest_hostfxr_path)!);
+                        File.Copy(hostfxr_path, dest_hostfxr_path);
+                        CopyDirectory(netcore_path, get_netcore_path(rootPublishDir), true);
+                        CopyDirectory(aspnetcore_path, get_aspnetcore_path(rootPublishDir), true);
+                        CopyDirectory(win_desktop_path, get_win_desktop_path(rootPublishDir), true);
+                    }
+                }
+                break;
+            case Platform.Linux:
+                if (isCopyRuntime)
+                {
+                    var dotnet_path = Path.Combine(rootPublishDir, "..", "dotnet-Runtime", $"{Platform.Linux}-{architecture}");
+                    CopyDirectory(dotnet_path, Path.Combine(rootPublishDir, "dotnet"), true);
+                    // TODO
+                }
+                break;
         }
     }
 
@@ -343,6 +746,13 @@ $"""
     {
         var nativeDir = Path.Combine(publishDir, "..", "native");
         var nativeWithRuntimeIdentifierDir = Path.Combine(nativeDir, runtimeIdentifier);
+        //switch (platform)
+        //{
+        //    case Platform.Linux:
+        //        nativeDir = Path.Combine(publishDir, "native");
+        //        nativeWithRuntimeIdentifierDir = Path.Combine(nativeDir, runtimeIdentifier);
+        //        break;
+        //}
         IOPath.DirCreateByNotExists(nativeWithRuntimeIdentifierDir);
         foreach (var libraryName in libraryNames)
         {
@@ -364,20 +774,33 @@ $"""
             var libPath = Path.Combine(publishDir, libFileName);
             if (File.Exists(libPath))
                 File.Move(libPath, Path.Combine(nativeWithRuntimeIdentifierDir, libFileName), true);
+            else if (!libFileName.StartsWith("lib", StringComparison.OrdinalIgnoreCase))
+            {
+                libPath = Path.Combine(publishDir, "lib" + libFileName);
+                if (File.Exists(libPath))
+                    File.Move(libPath, Path.Combine(nativeWithRuntimeIdentifierDir, libFileName), true);
+            }
+            else
+            {
+                libFileName = libFileName.TrimStart("lib", StringComparison.OrdinalIgnoreCase);
+                libPath = Path.Combine(publishDir, libFileName);
+                if (File.Exists(libPath))
+                    File.Move(libPath, Path.Combine(nativeWithRuntimeIdentifierDir, libFileName), true);
+            }
         }
     }
 
     static string GetPublishCommandByMacOSArm64()
     {
         var list = new List<string>();
-        SetPublishCommandArgumentList(list, false, Platform.Apple, DeviceIdiom.Desktop, Architecture.Arm64);
+        var arg = SetPublishCommandArgumentList(false, Platform.Apple, DeviceIdiom.Desktop, Architecture.Arm64);
+        SetPublishCommandArgumentList(list, arg);
         return $"dotnet {string.Join(' ', list)}";
     }
 
     /// <summary>
     /// 根据枚举值设置发布命令行参数
     /// </summary>
-    /// <param name="argumentList"></param>
     /// <param name="isDebug"></param>
     /// <param name="platform"></param>
     /// <param name="deviceIdiom"></param>
@@ -385,7 +808,6 @@ $"""
     /// <returns></returns>
     /// <exception cref="ArgumentOutOfRangeException"></exception>
     static PublishCommandArg SetPublishCommandArgumentList(
-        IList<string> argumentList,
         bool isDebug,
         Platform platform,
         DeviceIdiom deviceIdiom,
@@ -417,6 +839,12 @@ $"""
                     case DeviceIdiom.Desktop:
                         arg.Framework = $"net{Environment.Version.Major}.{Environment.Version.Minor}";
                         arg.RuntimeIdentifier = $"linux-{ArchToString(architecture)}";
+                        arg.UseAppHost = false;
+                        arg.SingleFile = false;
+                        arg.ReadyToRun = false;
+                        arg.Trimmed = false;
+                        arg.SelfContained = false;
+                        arg.Architecture = architecture;
                         // https://learn.microsoft.com/zh-cn/dotnet/core/tools/dotnet-run
                         // https://download.visualstudio.microsoft.com/download/pr/c1e2729e-ab96-4929-911d-bf0f24f06f47/1b2f39cbc4eb530e39cfe6f54ce78e45/aspnetcore-runtime-7.0.7-linux-x64.tar.gz
                         // dotnet "Steam++.dll" -clt devtools
@@ -439,7 +867,7 @@ $"""
                         arg.ReadyToRun = null;
                         arg.Trimmed = null;
                         arg.SelfContained = null;
-                        arg.CreatePackage = false;
+                        arg.CreatePackage = null;
                         break;
                     default:
                         throw new ArgumentOutOfRangeException(nameof(deviceIdiom), deviceIdiom, null);
@@ -448,7 +876,6 @@ $"""
             default:
                 throw new ArgumentOutOfRangeException(nameof(platform), platform, null);
         }
-        SetPublishCommandArgumentList(argumentList, arg);
         return arg;
     }
 
@@ -464,7 +891,9 @@ $"""
         bool? EnableMsixTooling = null,
         bool? GenerateAppxPackageOnBuild = null,
         bool? StripSymbols = null,
-        bool? CreatePackage = null)
+        bool? CreatePackage = null,
+        Architecture? Architecture = null
+        )
     {
         string? _Configuration;
 
@@ -481,19 +910,42 @@ $"""
 
         string? _PublishDir;
 
-        public string PublishDir
+        public string GetPublishDirWithAssemblies()
         {
-            get
-            {
-                _PublishDir ??= string.Join(Path.DirectorySeparatorChar, new[]
+            var value = string.Join(Path.DirectorySeparatorChar, new[]
                 {
                     "bin",
                     Configuration,
                     "Publish",
-                    RuntimeIdentifier,
+                    GetPublishFileName(IsDebug, RuntimeIdentifier),
                     "assemblies",
                 });
+            return value;
+        }
+
+        public string GetPublishDir()
+        {
+            var value = string.Join(Path.DirectorySeparatorChar, new[]
+                {
+                    "bin",
+                    Configuration,
+                    "Publish",
+                    GetPublishFileName(IsDebug, RuntimeIdentifier),
+                });
+            return value;
+        }
+
+        public string PublishDir
+        {
+            get
+            {
+                _PublishDir ??= /*RuntimeIdentifier.StartsWith("linux") ? GetPublishDir() :*/ GetPublishDirWithAssemblies();
                 return _PublishDir;
+            }
+
+            set
+            {
+                _PublishDir = value;
             }
         }
     }
@@ -505,7 +957,26 @@ publish -c {0} -p:OutputType={1} -p:PublishDir=bin\{0}\Publish\win-any -p:Publis
 
     static void PublishAppHost(string publishDir, Platform platform, bool debug)
     {
-        const string app_host_tfm = "net40"/*"net35"*/; // net35 在 Windows 10 LTSC 上即使 app.config 中配置了 4.x 兼容但依旧会打开设置窗口并且定位在可选功能
+        const string appconfigFileName = "Steam++.exe.config";
+
+        var rootPublishDir = Path.Combine(publishDir, "..");
+        //var cacheFilePath = Path.Combine(ProjectUtils.ProjPath,
+        //    "res", "windows", "Steam++.apphost");
+        //// 使用缓存文件
+        //if (File.Exists(cacheFilePath))
+        //{
+        //    File.Copy(cacheFilePath, Path.Combine(rootPublishDir, "Steam++.exe"));
+        //    var sourceFileName = Path.Combine(ProjectUtils.ProjPath, "src", "BD.WTTS.Client.AppHost", "App.config");
+        //    var appconfigContent = File.ReadAllText(sourceFileName);
+
+        //    var xmlDoc = new XmlDocument();
+        //    xmlDoc.LoadXml(appconfigContent);
+        //    appconfigContent = xmlDoc.InnerXml;
+        //    File.WriteAllText(Path.Combine(rootPublishDir, appconfigFileName), appconfigContent);
+        //    return;
+        //}
+
+        const string app_host_tfm = "net35";
         var configuration = PublishCommandArg.GetConfiguration(debug);
         string? arguments = null;
         bool isWindows = false;
@@ -527,10 +998,8 @@ publish -c {0} -p:OutputType={1} -p:PublishDir=bin\{0}\Publish\win-any -p:Publis
             arguments ?? // 多次相同的编译产生的文件不会变化
             throw new ArgumentOutOfRangeException(nameof(platform), platform, null));
 
-        var rootPublishDir = Path.Combine(publishDir, "..");
         if (isWindows)
         {
-            const string appconfigFileName = "Steam++.exe.config";
             var appHostPublishDir = Path.Combine(projRootPath, "bin", configuration, "Publish", "win-any");
             var apphostfilenames = new[]
             {
@@ -604,8 +1073,16 @@ publish -c {0} -p:OutputType={1} -p:PublishDir=bin\{0}\Publish\win-any -p:Publis
         if (arg.UseAppHost.HasValue)
             argumentList.Add($"-p:UseAppHost={arg.UseAppHost.Value.ToLowerString()}");
 
-        // PublishDir is used by the CLI to denote the Publish target.
-        argumentList.Add($@"-p:PublishDir={arg.PublishDir}");
+        if (!arg.Framework.StartsWith("osx"))
+        {
+            // PublishDir is used by the CLI to denote the Publish target.
+            argumentList.Add($@"-p:PublishDir={arg.PublishDir}");
+        }
+        else
+        {
+            argumentList.Add("-o");
+            argumentList.Add(arg.PublishDir);
+        }
 
         // 将应用打包到特定于平台的单个文件可执行文件中。
         if (arg.SingleFile.HasValue)
@@ -672,14 +1149,18 @@ publish -c {0} -p:OutputType={1} -p:PublishDir=bin\{0}\Publish\win-any -p:Publis
         argumentList.Add("--nologo");
     }
 
-    static IEnumerable<string> GetPluginNames()
+    static IEnumerable<string> GetPluginNames(Platform platform)
     {
         yield return AssemblyInfo.Accelerator;
         yield return AssemblyInfo.GameAccount;
         yield return AssemblyInfo.GameList;
-        //yield return AssemblyInfo.ArchiSteamFarmPlus;
         yield return AssemblyInfo.Authenticator;
-        yield return AssemblyInfo.GameTools;
+        yield return AssemblyInfo.SteamIdleCard;
+        if (platform == Platform.Windows)
+        {
+            yield return AssemblyInfo.ArchiSteamFarmPlus;
+            yield return AssemblyInfo.GameTools;
+        }
     }
 
     /// <summary>
@@ -697,7 +1178,7 @@ publish -c {0} -p:OutputType={1} -p:PublishDir=bin\{0}\Publish\win-any -p:Publis
                 string configuration,
                 string framework)
     {
-        foreach (var pluginName in GetPluginNames())
+        foreach (var pluginName in GetPluginNames(platform))
         {
             var projRootPath = Path.Combine(ProjectUtils.ProjPath, "src", $"BD.WTTS.Client.Plugins.{pluginName}");
             StartProcessAndWaitForExit(projRootPath, $"build -c {configuration} --nologo -v q /property:WarningLevel=1");
@@ -719,7 +1200,6 @@ publish -c {0} -p:OutputType={1} -p:PublishDir=bin\{0}\Publish\win-any -p:Publis
                     throw new FileNotFoundException(null, dllPath);
                 }
             }
-
             var pluginDir = Path.Combine(publishDir, "..", "modules", pluginName);
             IOPath.DirCreateByNotExists(pluginDir);
             var destFileName = Path.Combine(pluginDir, dllFileName);
@@ -732,16 +1212,19 @@ publish -c {0} -p:OutputType={1} -p:PublishDir=bin\{0}\Publish\win-any -p:Publis
             switch (pluginName)
             {
                 case AssemblyInfo.Accelerator:
-                    PublishAcceleratorReverseProxy(pluginDir, isDebug, platform, architecture);
+                    PublishAcceleratorReverseProxy(pluginName, pluginDir, isDebug, platform, architecture);
                     break;
             }
 
             static void PublishAcceleratorReverseProxy(
+                string pluginName,
                 string destinationDir,
                 bool isDebug,
                 Platform platform,
                 Architecture architecture)
             {
+                var isWinArm64 = platform == Platform.Windows && architecture == Architecture.Arm64;
+
                 PublishCommandArg arg = default;
                 arg.IsDebug = isDebug;
 
@@ -756,6 +1239,11 @@ publish -c {0} -p:OutputType={1} -p:PublishDir=bin\{0}\Publish\win-any -p:Publis
                 }
 
                 arg.Framework = $"net{Environment.Version.Major}.{Environment.Version.Minor}";
+                arg.UseAppHost = true;
+                arg.SingleFile = true;
+                arg.ReadyToRun = false;
+                arg.Trimmed = false;
+                arg.SelfContained = false;
                 if (isWindows)
                 {
                     //arg.Framework = $"net{Environment.Version.Major}.{Environment.Version.Minor}-windows{windowssdkver}";
@@ -767,6 +1255,9 @@ publish -c {0} -p:OutputType={1} -p:PublishDir=bin\{0}\Publish\win-any -p:Publis
                     switch (platform)
                     {
                         case Platform.Linux:
+                            arg.UseAppHost = true;
+                            arg.SingleFile = true;
+                            arg.SelfContained = false;
                             arg.RuntimeIdentifier = $"linux-{ArchToString(architecture)}";
                             break;
                         case Platform.Apple:
@@ -774,29 +1265,44 @@ publish -c {0} -p:OutputType={1} -p:PublishDir=bin\{0}\Publish\win-any -p:Publis
                             break;
                     }
                 }
-                arg.UseAppHost = true;
-                arg.SingleFile = true;
-                arg.ReadyToRun = false;
-                arg.Trimmed = false;
-                arg.SelfContained = false;
-
                 var projRootPath = Path.Combine(ProjectUtils.ProjPath, "src", "BD.WTTS.Client.Plugins.Accelerator.ReverseProxy");
+
+                if (isWinArm64)
+                {
+                    arg.SingleFile = true;
+                    arg.SelfContained = true;
+                }
+
+                arg.PublishDir = arg.GetPublishDir();
 
                 CleanProjDir(projRootPath);
                 var psi = GetProcessStartInfo(projRootPath);
                 SetPublishCommandArgumentList(psi.ArgumentList, arg);
-                if (!isWindows)
-                {
-                    psi.ArgumentList.Add("-p:DefineConstants=NOT_WINDOWS;$(DefineConstants)");
-                }
+                //if (!isWindows)
+                //{
+                //    psi.ArgumentList.Add("-p:\"DefineConstants=NOT_WINDOWS;$(DefineConstants)\"");
+                //}
 
                 var argument = string.Join(' ', psi.ArgumentList);
                 Console.WriteLine(argument);
 
-                StartProcessAndWaitForExit(psi);
+                ProcessHelper.StartAndWaitForExit(psi);
 
                 var publishDir = Path.Combine(projRootPath, arg.PublishDir);
-                CopyDirectory(publishDir, destinationDir, true);
+
+                var aspnetcorev2_inprocess = Path.Combine(publishDir, "aspnetcorev2_inprocess.dll");
+                IOPath.FileTryDelete(aspnetcorev2_inprocess);
+                if (isWindows)
+                {
+                    var e_sqlite3 = Path.Combine(publishDir, "e_sqlite3.dll");
+                    IOPath.FileTryDelete(e_sqlite3);
+                    CopyDirectory(publishDir, destinationDir, true);
+                }
+                else
+                {
+                    var startName = $"Steam++.{pluginName}";
+                    File.Copy(Path.Combine(publishDir, startName), Path.Combine(destinationDir, startName));
+                }
             }
         }
     }

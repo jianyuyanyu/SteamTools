@@ -23,22 +23,12 @@ public partial interface IProxySettings
     /// <summary>
     /// 启用脚本自动检查更新
     /// </summary>
-    bool? IsAutoCheckScriptUpdate { get; set; }
-
-    /// <summary>
-    /// 启用脚本自动检查更新的默认值
-    /// </summary>
-    const bool DefaultIsAutoCheckScriptUpdate = true;
+    bool IsAutoCheckScriptUpdate { get; set; }
 
     /// <summary>
     /// 启用代理脚本
     /// </summary>
-    bool? IsEnableScript { get; set; }
-
-    /// <summary>
-    /// 启用代理脚本的默认值
-    /// </summary>
-    const bool DefaultIsEnableScript = false;
+    bool IsEnableScript { get; set; }
 
     /// <summary>
     /// 代理服务启用状态
@@ -46,41 +36,21 @@ public partial interface IProxySettings
     IReadOnlyCollection<string>? SupportProxyServicesStatus { get; set; }
 
     /// <summary>
-    /// 代理服务启用状态的默认值
-    /// </summary>
-    static readonly IReadOnlyCollection<string> DefaultSupportProxyServicesStatus = Array.Empty<string>();
-
-    /// <summary>
     /// 脚本启用状态
     /// </summary>
     IReadOnlyCollection<int>? ScriptsStatus { get; set; }
-
-    /// <summary>
-    /// 脚本启用状态的默认值
-    /// </summary>
-    static readonly IReadOnlyCollection<int> DefaultScriptsStatus = Array.Empty<int>();
 
     #region 代理设置
 
     /// <summary>
     /// 程序启动时自动启动代理
     /// </summary>
-    bool? ProgramStartupRunProxy { get; set; }
-
-    /// <summary>
-    /// 程序启动时自动启动代理的默认值
-    /// </summary>
-    const bool DefaultProgramStartupRunProxy = false;
+    bool ProgramStartupRunProxy { get; set; }
 
     /// <summary>
     /// 系统代理模式端口
     /// </summary>
-    ushort? SystemProxyPortId { get; set; }
-
-    /// <summary>
-    /// 系统代理模式端口的默认值
-    /// </summary>
-    const ushort DefaultSystemProxyPortId = 26561;
+    ushort SystemProxyPortId { get; set; }
 
     /// <summary>
     /// 系统代理模式IP
@@ -88,19 +58,9 @@ public partial interface IProxySettings
     string? SystemProxyIp { get; set; }
 
     /// <summary>
-    /// 系统代理模式IP的默认值
-    /// </summary>
-    static readonly string DefaultSystemProxyIp = IPAddress.Any.ToString();
-
-    /// <summary>
     /// 开启加速后仅代理脚本而不加速
     /// </summary>
-    bool? OnlyEnableProxyScript { get; set; }
-
-    /// <summary>
-    /// 开启加速后仅代理脚本而不加速的默认值
-    /// </summary>
-    const bool DefaultOnlyEnableProxyScript = false;
+    bool OnlyEnableProxyScript { get; set; }
 
     /// <summary>
     /// 代理时使用的解析主DNS
@@ -108,19 +68,9 @@ public partial interface IProxySettings
     string? ProxyMasterDns { get; set; }
 
     /// <summary>
-    /// 代理时使用的解析主DNS的默认值
-    /// </summary>
-    const string DefaultProxyMasterDns = "223.5.5.5";
-
-    /// <summary>
     /// 启用 Http 链接转发到 Https
     /// </summary>
-    bool? EnableHttpProxyToHttps { get; set; }
-
-    /// <summary>
-    /// 启用 Http 链接转发到 Https的默认值
-    /// </summary>
-    const bool DefaultEnableHttpProxyToHttps = true;
+    bool EnableHttpProxyToHttps { get; set; }
 
     #endregion
 
@@ -129,22 +79,12 @@ public partial interface IProxySettings
     /// <summary>
     /// Socks5 Enable
     /// </summary>
-    bool? Socks5ProxyEnable { get; set; }
-
-    /// <summary>
-    /// Socks5 Enable的默认值
-    /// </summary>
-    const bool DefaultSocks5ProxyEnable = false;
+    bool Socks5ProxyEnable { get; set; }
 
     /// <summary>
     /// Socks5 监听端口
     /// </summary>
-    ushort? Socks5ProxyPortId { get; set; }
-
-    /// <summary>
-    /// Socks5 监听端口的默认值
-    /// </summary>
-    const ushort DefaultSocks5ProxyPortId = 8868;
+    ushort Socks5ProxyPortId { get; set; }
 
     #endregion
 
@@ -153,22 +93,12 @@ public partial interface IProxySettings
     /// <summary>
     /// TwoLevelAgent Enable
     /// </summary>
-    bool? TwoLevelAgentEnable { get; set; }
-
-    /// <summary>
-    /// TwoLevelAgent Enable的默认值
-    /// </summary>
-    const bool DefaultTwoLevelAgentEnable = false;
+    bool TwoLevelAgentEnable { get; set; }
 
     /// <summary>
     /// TwoLevelAgent ProxyType
     /// </summary>
-    ExternalProxyType? TwoLevelAgentProxyType { get; set; }
-
-    /// <summary>
-    /// TwoLevelAgent ProxyType的默认值
-    /// </summary>
-    const ExternalProxyType DefaultTwoLevelAgentProxyType = IReverseProxyService.Constants.DefaultTwoLevelAgentProxyType;
+    ExternalProxyType TwoLevelAgentProxyType { get; set; }
 
     /// <summary>
     /// 二级代理 IP
@@ -176,19 +106,9 @@ public partial interface IProxySettings
     string? TwoLevelAgentIp { get; set; }
 
     /// <summary>
-    /// 二级代理 IP的默认值
-    /// </summary>
-    static readonly string DefaultTwoLevelAgentIp = IPAddress.Loopback.ToString();
-
-    /// <summary>
     /// 二级代理 监听端口
     /// </summary>
-    ushort? TwoLevelAgentPortId { get; set; }
-
-    /// <summary>
-    /// 二级代理 监听端口的默认值
-    /// </summary>
-    const ushort DefaultTwoLevelAgentPortId = 7890;
+    ushort TwoLevelAgentPortId { get; set; }
 
     /// <summary>
     /// TwoLevelAgent UserName
@@ -196,19 +116,9 @@ public partial interface IProxySettings
     string? TwoLevelAgentUserName { get; set; }
 
     /// <summary>
-    /// TwoLevelAgent UserName的默认值
-    /// </summary>
-    const string? DefaultTwoLevelAgentUserName = null;
-
-    /// <summary>
     /// TwoLevelAgent Password
     /// </summary>
     string? TwoLevelAgentPassword { get; set; }
-
-    /// <summary>
-    /// TwoLevelAgent Password的默认值
-    /// </summary>
-    const string? DefaultTwoLevelAgentPassword = null;
 
     #endregion
 
@@ -217,12 +127,7 @@ public partial interface IProxySettings
     /// <summary>
     /// 当前代理模式
     /// </summary>
-    ProxyMode? ProxyMode { get; set; }
-
-    /// <summary>
-    /// 当前代理模式的默认值
-    /// </summary>
-    static readonly ProxyMode DefaultProxyMode = Enums.ProxyMode.Hosts;
+    ProxyMode ProxyMode { get; set; }
 
     #endregion
 
@@ -231,7 +136,134 @@ public partial interface IProxySettings
     /// <summary>
     /// 启用 GOG 插件代理
     /// </summary>
-    bool? IsProxyGOG { get; set; }
+    bool IsProxyGOG { get; set; }
+
+    /// <summary>
+    /// 是否只针对 Steam 内置浏览器启用脚本
+    /// </summary>
+    bool IsOnlyWorkSteamBrowser { get; set; }
+
+#endif
+
+    /// <summary>
+    /// 启用 DNS over HTTPS
+    /// </summary>
+    bool UseDoh { get; set; }
+
+    /// <summary>
+    /// 自定义 DNS over HTTPS 地址
+    /// </summary>
+    string? CustomDohAddres2 { get; set; }
+
+    /// <summary>
+    /// 加速页面 Tab 选项卡选中下标
+    /// </summary>
+    int AcceleratorTabsSelectedIndex { get; set; }
+
+    /// <summary>
+    /// 加速后自动唤起 Watt 加速器界面
+    /// </summary>
+    bool AutoShowWattAcceleratorWindow { get; set; }
+
+    /// <summary>
+    /// 加速前进行 DNS 可用性检查
+    /// </summary>
+    bool ProxyBeforeDNSCheck { get; set; }
+
+    /// <summary>
+    /// 启用脚本自动检查更新的默认值
+    /// </summary>
+    const bool DefaultIsAutoCheckScriptUpdate = true;
+
+    /// <summary>
+    /// 启用代理脚本的默认值
+    /// </summary>
+    const bool DefaultIsEnableScript = false;
+
+    /// <summary>
+    /// 代理服务启用状态的默认值
+    /// </summary>
+    static readonly IReadOnlyCollection<string> DefaultSupportProxyServicesStatus = Array.Empty<string>();
+
+    /// <summary>
+    /// 脚本启用状态的默认值
+    /// </summary>
+    static readonly IReadOnlyCollection<int> DefaultScriptsStatus = Array.Empty<int>();
+
+    /// <summary>
+    /// 程序启动时自动启动代理的默认值
+    /// </summary>
+    const bool DefaultProgramStartupRunProxy = false;
+
+    /// <summary>
+    /// 系统代理模式端口的默认值
+    /// </summary>
+    const ushort DefaultSystemProxyPortId = 26561;
+
+    /// <summary>
+    /// 系统代理模式IP的默认值
+    /// </summary>
+    static readonly string DefaultSystemProxyIp = IPAddress.Any.ToString();
+
+    /// <summary>
+    /// 开启加速后仅代理脚本而不加速的默认值
+    /// </summary>
+    const bool DefaultOnlyEnableProxyScript = false;
+
+    /// <summary>
+    /// 代理时使用的解析主DNS的默认值
+    /// </summary>
+    const string DefaultProxyMasterDns = "223.5.5.5";
+
+    /// <summary>
+    /// 启用 Http 链接转发到 Https的默认值
+    /// </summary>
+    const bool DefaultEnableHttpProxyToHttps = true;
+
+    /// <summary>
+    /// Socks5 Enable的默认值
+    /// </summary>
+    const bool DefaultSocks5ProxyEnable = false;
+
+    /// <summary>
+    /// Socks5 监听端口的默认值
+    /// </summary>
+    const ushort DefaultSocks5ProxyPortId = 8868;
+
+    /// <summary>
+    /// TwoLevelAgent Enable的默认值
+    /// </summary>
+    const bool DefaultTwoLevelAgentEnable = false;
+
+    /// <summary>
+    /// TwoLevelAgent ProxyType的默认值
+    /// </summary>
+    const ExternalProxyType DefaultTwoLevelAgentProxyType = IReverseProxyService.Constants.DefaultTwoLevelAgentProxyType;
+
+    /// <summary>
+    /// 二级代理 IP的默认值
+    /// </summary>
+    static readonly string DefaultTwoLevelAgentIp = IPAddress.Loopback.ToString();
+
+    /// <summary>
+    /// 二级代理 监听端口的默认值
+    /// </summary>
+    const ushort DefaultTwoLevelAgentPortId = 7890;
+
+    /// <summary>
+    /// TwoLevelAgent UserName的默认值
+    /// </summary>
+    const string? DefaultTwoLevelAgentUserName = null;
+
+    /// <summary>
+    /// TwoLevelAgent Password的默认值
+    /// </summary>
+    const string? DefaultTwoLevelAgentPassword = null;
+
+    /// <summary>
+    /// 当前代理模式的默认值
+    /// </summary>
+    static readonly ProxyMode DefaultProxyMode = Enums.ProxyMode.Hosts;
 
     /// <summary>
     /// 启用 GOG 插件代理的默认值
@@ -239,15 +271,33 @@ public partial interface IProxySettings
     const bool DefaultIsProxyGOG = false;
 
     /// <summary>
-    /// 是否只针对 Steam 内置浏览器启用脚本
-    /// </summary>
-    bool? IsOnlyWorkSteamBrowser { get; set; }
-
-    /// <summary>
     /// 是否只针对 Steam 内置浏览器启用脚本的默认值
     /// </summary>
     const bool DefaultIsOnlyWorkSteamBrowser = false;
 
-#endif
+    /// <summary>
+    /// 启用 DNS over HTTPS的默认值
+    /// </summary>
+    const bool DefaultUseDoh = true;
+
+    /// <summary>
+    /// 自定义 DNS over HTTPS 地址的默认值
+    /// </summary>
+    const string? DefaultCustomDohAddres2 = null;
+
+    /// <summary>
+    /// 加速页面 Tab 选项卡选中下标的默认值
+    /// </summary>
+    static readonly int DefaultAcceleratorTabsSelectedIndex = 0;
+
+    /// <summary>
+    /// 加速后自动唤起 Watt 加速器界面的默认值
+    /// </summary>
+    const bool DefaultAutoShowWattAcceleratorWindow = true;
+
+    /// <summary>
+    /// 加速前进行 DNS 可用性检查的默认值
+    /// </summary>
+    const bool DefaultProxyBeforeDNSCheck = true;
 
 }

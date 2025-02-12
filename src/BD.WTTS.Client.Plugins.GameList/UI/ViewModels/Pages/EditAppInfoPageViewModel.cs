@@ -13,8 +13,7 @@ public sealed class EditAppInfoPageViewModel : WindowViewModel
 
     public ReadOnlyObservableCollection<SteamGridItem>? SteamGridItems => _SteamGridItems;
 
-    [Reactive]
-    public SteamApp App { get; set; }
+    public SteamApp App { get; }
 
     [Reactive]
     public SteamGridItem? SelectGrid { get; set; }
@@ -36,7 +35,7 @@ public sealed class EditAppInfoPageViewModel : WindowViewModel
 
     public ICommand OpenSteamGridDBAuthorUrlCommand { get; }
 
-    public EditAppInfoPageViewModel(SteamApp app)
+    public EditAppInfoPageViewModel(ref SteamApp app)
     {
         App = app;
 
@@ -121,8 +120,9 @@ public sealed class EditAppInfoPageViewModel : WindowViewModel
     public async void SaveEditAppInfo()
     {
         #region 自定义图片保存
-        var mostRecentUser = ISteamService.Instance.GetRememberUserList().Where(s => s.MostRecent).FirstOrDefault();
-        if (!(App.EditHeaderLogoStream is FileStream fs3))
+        //var mostRecentUser = ISteamService.Instance.GetRememberUserList().Where(s => s.MostRecent).FirstOrDefault();
+        var mostRecentUser = SteamConnectService.Current.SteamUsers.Items.Where(s => s.MostRecent).FirstOrDefault();
+        if (!(App.EditHeaderLogoStream is FileStream fs3 && fs3.Name == (await App.HeaderLogoStream)?.Name))
         {
             if (!CheckCurrentSteamUserStats(mostRecentUser))
                 return;
@@ -130,10 +130,12 @@ public sealed class EditAppInfoPageViewModel : WindowViewModel
             if (await ISteamService.Instance.SaveAppImageToSteamFile(App.EditHeaderLogoStream,
              mostRecentUser!, App.AppId, SteamGridItemType.Header) == false)
             {
-                Toast.Show(ToastIcon.Error, string.Format(Strings.SaveImageFileFailed, nameof(SteamGridItemType.Logo)));
+                Toast.Show(ToastIcon.Error, string.Format(Strings.SaveImageFileFailed, nameof(SteamGridItemType.Header)));
             }
+            else
+                this.RaisePropertyChanged(nameof(App.HeaderLogoStream));
         }
-        if (!(App.EditLibraryLogoStream is FileStream fs))
+        if (!(App.EditLibraryLogoStream is FileStream fs && fs.Name == (await App.LibraryLogoStream)?.Name))
         {
             if (!CheckCurrentSteamUserStats(mostRecentUser))
                 return;
@@ -143,8 +145,10 @@ public sealed class EditAppInfoPageViewModel : WindowViewModel
             {
                 Toast.Show(ToastIcon.Error, string.Format(Strings.SaveImageFileFailed, nameof(SteamGridItemType.Logo)));
             }
+            else
+                this.RaisePropertyChanged(nameof(App.LibraryLogoStream));
         }
-        if (!(App.EditLibraryHeroStream is FileStream fs1))
+        if (!(App.EditLibraryHeroStream is FileStream fs1 && fs1.Name == (await App.LibraryHeroStream)?.Name))
         {
             if (!CheckCurrentSteamUserStats(mostRecentUser))
                 return;
@@ -154,8 +158,10 @@ public sealed class EditAppInfoPageViewModel : WindowViewModel
             {
                 Toast.Show(ToastIcon.Error, string.Format(Strings.SaveImageFileFailed, nameof(SteamGridItemType.Hero)));
             }
+            else
+                this.RaisePropertyChanged(nameof(App.LibraryHeroStream));
         }
-        if (!(App.EditLibraryGridStream is FileStream fs2))
+        if (!(App.EditLibraryGridStream is FileStream fs2 && fs2.Name == (await App.LibraryGridStream)?.Name))
         {
             if (!CheckCurrentSteamUserStats(mostRecentUser))
                 return;
@@ -165,6 +171,8 @@ public sealed class EditAppInfoPageViewModel : WindowViewModel
             {
                 Toast.Show(ToastIcon.Error, string.Format(Strings.SaveImageFileFailed, nameof(SteamGridItemType.Grid)));
             }
+            else
+                this.RaisePropertyChanged(nameof(App.LibraryGridStream));
         }
         #endregion
 
@@ -175,13 +183,15 @@ public sealed class EditAppInfoPageViewModel : WindowViewModel
         //await MessageBox.ShowAsync("保存成功但还不会直接写入Steam文件, 请打开[保存Steam游戏自定义信息窗口]保存所有更改信息到Steam文件中。",
         //    ThisAssembly.AssemblyTrademark, MessageBox.Button.OK, MessageBox.Image.None, MessageBox.DontPromptType.SaveEditAppInfo);
 
-        this.Close?.Invoke();
+        Toast.Show(ToastIcon.Info, "保存成功但还不会直接写入 Steam 文件，请到右上角编辑列表中保存所有更改信息到 Steam 文件中，即可生效！");
+
+        this.Close?.Invoke(false);
     }
 
     public void CancelEditAppInfo()
     {
         App.RefreshEditImage();
-        this.Close?.Invoke();
+        this.Close?.Invoke(false);
     }
 
     public void ResetEditAppInfo()
@@ -191,7 +201,7 @@ public sealed class EditAppInfoPageViewModel : WindowViewModel
         App.RefreshEditImage();
         if (App.OriginalData != null)
         {
-            using BinaryReader reader = new BinaryReader(new MemoryStream(App.OriginalData));
+            using BinaryReader reader = new BinaryReader(new MemoryStream(App.OriginalData), Encoding.UTF8, true);
             reader.BaseStream.Seek(40L, SeekOrigin.Current);
             var table = reader.ReadPropertyTable();
 
@@ -227,9 +237,30 @@ public sealed class EditAppInfoPageViewModel : WindowViewModel
     {
         if (SelectGrid == null)
         {
-            Toast.Show(Strings.SaveEditedAppInfo_SelectImageFailed);
+            //Toast.Show(ToastIcon.Warning, Strings.SaveEditedAppInfo_SelectImageFailed);
+            var mostRecentUser = SteamConnectService.Current.SteamUsers.Items.Where(s => s.MostRecent).FirstOrDefault();
+            if (!CheckCurrentSteamUserStats(mostRecentUser))
+                return;
+            await ISteamService.Instance.SaveAppImageToSteamFile(null, mostRecentUser!, App.AppId, type);
+
+            switch (type)
+            {
+                case SteamGridItemType.Header:
+                    App.EditHeaderLogoStream = (await App.HeaderLogoStream)?.Stream;
+                    break;
+                case SteamGridItemType.Grid:
+                    App.EditLibraryGridStream = (await App.LibraryGridStream)?.Stream;
+                    break;
+                case SteamGridItemType.Hero:
+                    App.EditLibraryHeroStream = (await App.LibraryHeroStream)?.Stream;
+                    break;
+                case SteamGridItemType.Logo:
+                    App.EditLibraryLogoStream = (await App.LibraryLogoStream)?.Stream;
+                    break;
+            }
             return;
         }
+        Toast.Show(ToastIcon.Info, "图片下载需要一些时间，请稍后");
         var imageHttpClientService = Ioc.Get<IImageHttpClientService>();
         var stream = await imageHttpClientService.GetImageMemoryStreamAsync(SelectGrid.Url, default);
         switch (type)
@@ -251,14 +282,6 @@ public sealed class EditAppInfoPageViewModel : WindowViewModel
 
     public override void OnClosing(object? sender, CancelEventArgs e)
     {
-        if (App != null && !App.IsEdited)
-        {
-            App.EditLibraryGridStream = null;
-            App.EditLibraryHeroStream = null;
-            App.EditLibraryLogoStream = null;
-            App.EditHeaderLogoStream = null;
-        }
-
         _SteamGridItemSourceList.Dispose();
     }
 

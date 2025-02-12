@@ -23,22 +23,17 @@ public partial interface IGameLibrarySettings
     /// <summary>
     /// 已安装游戏筛选
     /// </summary>
-    bool? GameInstalledFilter { get; set; }
+    bool GameInstalledFilter { get; set; }
 
     /// <summary>
-    /// 已安装游戏筛选的默认值
+    /// 库存游戏展示布局
     /// </summary>
-    const bool DefaultGameInstalledFilter = true;
+    GridLayoutType GameLibraryLayoutType { get; set; }
 
     /// <summary>
     /// 支持云存档游戏筛选状态
     /// </summary>
-    bool? GameCloudArchiveFilter { get; set; }
-
-    /// <summary>
-    /// 支持云存档游戏筛选状态的默认值
-    /// </summary>
-    const bool DefaultGameCloudArchiveFilter = false;
+    bool GameCloudArchiveFilter { get; set; }
 
     /// <summary>
     /// 游戏类型筛选状态列表
@@ -46,19 +41,9 @@ public partial interface IGameLibrarySettings
     List<SteamAppType>? GameTypeFiltres { get; set; }
 
     /// <summary>
-    /// 游戏类型筛选状态列表的默认值
-    /// </summary>
-    static readonly List<SteamAppType> DefaultGameTypeFiltres = new List<SteamAppType> { SteamAppType.Game, SteamAppType.Application, SteamAppType.Demo, SteamAppType.Beta };
-
-    /// <summary>
     /// 隐藏的游戏列表
     /// </summary>
     Dictionary<uint, string?>? HideGameList { get; set; }
-
-    /// <summary>
-    /// 隐藏的游戏列表的默认值
-    /// </summary>
-    static readonly Dictionary<uint, string?> DefaultHideGameList = new();
 
     /// <summary>
     /// 挂时长游戏列表
@@ -66,14 +51,39 @@ public partial interface IGameLibrarySettings
     Dictionary<uint, string?>? AFKAppList { get; set; }
 
     /// <summary>
+    /// 启用自动挂机
+    /// </summary>
+    bool IsAutoAFKApps { get; set; }
+
+    /// <summary>
+    /// 已安装游戏筛选的默认值
+    /// </summary>
+    const bool DefaultGameInstalledFilter = false;
+
+    /// <summary>
+    /// 库存游戏展示布局的默认值
+    /// </summary>
+    const GridLayoutType DefaultGameLibraryLayoutType = GridLayoutType.Grid;
+
+    /// <summary>
+    /// 支持云存档游戏筛选状态的默认值
+    /// </summary>
+    const bool DefaultGameCloudArchiveFilter = false;
+
+    /// <summary>
+    /// 游戏类型筛选状态列表的默认值
+    /// </summary>
+    static readonly List<SteamAppType> DefaultGameTypeFiltres = new List<SteamAppType> { SteamAppType.Game, SteamAppType.Application, SteamAppType.Demo, SteamAppType.Beta };
+
+    /// <summary>
+    /// 隐藏的游戏列表的默认值
+    /// </summary>
+    static readonly Dictionary<uint, string?> DefaultHideGameList = new();
+
+    /// <summary>
     /// 挂时长游戏列表的默认值
     /// </summary>
     static readonly Dictionary<uint, string?> DefaultAFKAppList = new();
-
-    /// <summary>
-    /// 启用自动挂机
-    /// </summary>
-    bool? IsAutoAFKApps { get; set; }
 
     /// <summary>
     /// 启用自动挂机的默认值

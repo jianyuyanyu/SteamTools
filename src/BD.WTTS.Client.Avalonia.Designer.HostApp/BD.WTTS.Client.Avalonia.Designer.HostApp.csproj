@@ -67,9 +67,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="BD.Common.XmlnsDefinition.Avalonia">
-			<Aliases>BD_Common_XmlnsDefinition_Avalonia</Aliases>
-		</PackageReference>
+		<PackageReference Include="Moq" />
 		<ProjectReference Include="..\BD.WTTS.Client.Avalonia\BD.WTTS.Client.Avalonia.csproj" />
 		<ProjectReference Include="..\BD.WTTS.Client.Plugins.Accelerator\BD.WTTS.Client.Plugins.Accelerator.csproj" />
 		<ProjectReference Include="..\BD.WTTS.Client.Plugins.ArchiSteamFarmPlus\BD.WTTS.Client.Plugins.ArchiSteamFarmPlus.csproj" />
@@ -77,6 +75,7 @@
 		<ProjectReference Include="..\BD.WTTS.Client.Plugins.GameAccount\BD.WTTS.Client.Plugins.GameAccount.csproj" />
 		<ProjectReference Include="..\BD.WTTS.Client.Plugins.GameList\BD.WTTS.Client.Plugins.GameList.csproj" />
 		<ProjectReference Include="..\BD.WTTS.Client.Plugins.GameTools\BD.WTTS.Client.Plugins.GameTools.csproj" />
+		<ProjectReference Include="..\BD.WTTS.Client.Plugins.SteamIdleCard\BD.WTTS.Client.Plugins.SteamIdleCard.csproj" />
 		<ProjectReference Include="..\BD.WTTS.Client\BD.WTTS.Client.csproj" />
 	</ItemGroup>
 

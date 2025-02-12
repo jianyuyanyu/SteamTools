@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
@@ -13,6 +14,9 @@ public partial class MainFramePage : UserControl
     {
         InitializeComponent();
 
+        //Tabs.Items.Add(new TabStripItem { Content = Strings.CommunityFix, Tag = typeof(AcceleratorPage) });
+        //Tabs.Items.Add(new TabStripItem { Content = Strings.ScriptConfig, Tag = typeof(ScriptPage) });
+
         Tabs.SelectionChanged += Tabs_SelectionChanged;
     }
 
@@ -23,7 +27,7 @@ public partial class MainFramePage : UserControl
         Tabs_SelectionChanged(null, null);
     }
 
-    private void Tabs_SelectionChanged(object? sender, SelectionChangedEventArgs? e)
+    private void Tabs_SelectionChanged(object? sender, Avalonia.Controls.SelectionChangedEventArgs? e)
     {
         if (Tabs.SelectedItem is TabStripItem tab && tab.Tag is Type t)
         {

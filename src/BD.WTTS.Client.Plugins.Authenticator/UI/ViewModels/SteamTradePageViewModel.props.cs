@@ -3,93 +3,30 @@ using BD.WTTS.Client.Resources;
 
 namespace BD.WTTS.UI.ViewModels;
 
-public sealed partial class SteamTradePageViewModel : ViewModelBase
+public sealed partial class SteamTradePageViewModel
 {
-    string? _userNameText;
-    string? _passwordText;
-    string? _captchaCodeText;
-    string? _captchaImageUrlText;
-    bool _isLogged;
-    bool _isLoading;
-    bool _selectedAll;
+    [Reactive]
+    public ObservableCollection<SteamTradeConfirmationModel> Confirmations { get; set; } = new();
 
-    public string? UserNameText
-    {
-        get => _userNameText;
-        set
-        {
-            if (value == _userNameText) return;
-            _userNameText = value;
-            this.RaisePropertyChanged();
-        }
-    }
+    [Reactive]
+    public string? UserNameText { get; set; }
 
-    public string? PasswordText
-    {
-        get => _passwordText;
-        set
-        {
-            if (value == _passwordText) return;
-            _passwordText = value;
-            this.RaisePropertyChanged();
-        }
-    }
+    [Reactive]
+    public string? PasswordText { get; set; }
 
-    public string? CaptchaImageUrlText
-    {
-        get => _captchaImageUrlText;
-        set
-        {
-            if (value == _captchaImageUrlText) return;
-            _captchaImageUrlText = value;
-            this.RaisePropertyChanged();
-        }
-    }
+    [Reactive]
+    public bool RemenberLogin { get; set; } = true;
 
-    public string? CaptchaCodeText
-    {
-        get => _captchaCodeText;
-        set
-        {
-            if (value == _captchaCodeText) return;
-            _captchaCodeText = value;
-            this.RaisePropertyChanged();
-        }
-    }
+    [Reactive]
+    public bool IsLogged { get; set; }
 
-    public bool IsLogged
-    {
-        get => _isLogged;
-        set
-        {
-            if (value == _isLogged) return;
-            _isLogged = value;
-            this.RaisePropertyChanged();
-        }
-    }
+    [Reactive]
+    public bool IsLoading { get; set; }
 
-    public bool IsLoading
-    {
-        get => _isLoading;
-        set
-        {
-            if (value == _isLoading) return;
-            _isLoading = value;
-            this.RaisePropertyChanged();
-        }
-    }
+    [Reactive]
+    public bool? SelectedAll { get; set; } = false;
 
-    public bool SelectedAll
-    {
-        get => _selectedAll;
-        set
-        {
-            if (value == _selectedAll) return;
-            _selectedAll = value;
-            SelectAll(_selectedAll);
-            this.RaisePropertyChanged();
-        }
-    }
+    public ICommand ConfirmTradeCommand { get; }
 
-    public bool IsConfirmationsAny => Confirmations.Any_Nullable();
+    public ICommand CancelTradeCommand { get; }
 }

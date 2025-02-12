@@ -49,7 +49,7 @@ public static class KestrelServerOptionsExtensions
             IReverseProxyService.Constants.Instance.ProxyIp, httpProxyPort);
     }
 
-#if !NOT_WINDOWS
+#if WINDOWS
     /// <summary>
     /// 监听 SSH 反向代理
     /// </summary>
@@ -70,7 +70,7 @@ public static class KestrelServerOptionsExtensions
     }
 #endif
 
-#if !NOT_WINDOWS
+#if WINDOWS
     /// <summary>
     /// 监听 Git 反向代理
     /// </summary>
@@ -123,6 +123,7 @@ public static class KestrelServerOptionsExtensions
         var httpsPort = IReverseProxyConfig.HttpsPort;
         options.Listen(IReverseProxyService.Constants.Instance.ProxyIp, httpsPort, listen =>
         {
+            listen.Protocols = HttpProtocols.Http1AndHttp2;
             listen.UseFlowAnalyze();
             listen.UseTls();
         });

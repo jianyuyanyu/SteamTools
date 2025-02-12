@@ -1,42 +1,70 @@
-using AppResources = BD.WTTS.Client.Resources.Strings;
-
+using BD.SteamClient.Models;
+using BD.SteamClient.Services;
 using WinAuth;
+using AppResources = BD.WTTS.Client.Resources.Strings;
+using WSteamClient = WinAuth.SteamClient;
 
 namespace BD.WTTS.UI.ViewModels;
 
-public sealed partial class SteamTradePageViewModel
+public sealed partial class SteamTradePageViewModel : WindowViewModel
 {
+    readonly IAuthenticatorDTO _authenticatorDto;
+    WSteamClient? _steamClient;
     readonly SteamAuthenticator? _steamAuthenticator;
-    
-    WinAuth.SteamClient? _steamClient;
-
-    string? _captchaId;
-
-    [Reactive]
-    public ObservableCollection<SteamTradeConfirmationModel> Confirmations { get; set; } = new();
-    
-    public SteamTradePageViewModel()
-    {
-    }
+    readonly ISteamAccountService _steamAccountService = Ioc.Get<ISteamAccountService>();
 
     public SteamTradePageViewModel(ref IAuthenticatorDTO authenticatorDto)
     {
-        if (authenticatorDto.Value is SteamAuthenticator steamAuthenticator)
+        _authenticatorDto = authenticatorDto;
+
+        ConfirmTradeCommand = ReactiveCommand.Create<SteamTradeConfirmationModel>(ConfirmTrade);
+        CancelTradeCommand = ReactiveCommand.Create<SteamTradeConfirmationModel>(CancelTrade);
+
+        try
         {
-            _steamAuthenticator = steamAuthenticator;
+            if (authenticatorDto.Value is SteamAuthenticator steamAuthenticator)
+            {
+                _steamAuthenticator = steamAuthenticator;
+                _steamClient = _steamAuthenticator.GetClient(ResourceService.GetCurrentCultureSteamLanguageName());
+                UserNameText = _steamAuthenticator.AccountName ?? "";
+                authenticatorDto.Value = _steamAuthenticator;
+                _ = Initialize();
 
-            _steamClient = _steamAuthenticator.GetClient();
-            
-            Initialize();
+                this.WhenAnyValue(v => v.Confirmations)
+                    .Subscribe(items => items?
+                    .ToObservableChangeSet()
+                    .AutoRefresh(x => x.IsSelected)
+                    .WhenValueChanged(x => x.IsSelected)
+                    .Subscribe(_ =>
+                    {
+                        bool? b = null;
+                        var count = items.Count(s => s.IsSelected);
+                        if (!items.Any_Nullable() || count == 0)
+                            b = false;
+                        else if (count == items.Count)
+                            b = true;
 
-            UserNameText = _steamAuthenticator.AccountName ?? "";
-
-            authenticatorDto.Value = _steamAuthenticator;
+                        if (SelectedAll != b)
+                        {
+                            SelectedAll = b;
+                        }
+                    }));
+            }
+            else
+            {
+                Close?.Invoke(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            ex.LogAndShowT();
         }
     }
 
-    async void Initialize()
+    public override async Task Initialize()
     {
+        await base.Initialize();
+
         if (_steamClient!.IsLoggedIn() == false)
         {
             IsLoading = false;
@@ -44,22 +72,75 @@ public sealed partial class SteamTradePageViewModel
         }
         else
         {
-            IsLogged = true;
+            IsLogged = await CheckAndRefreshToken();
+
             await GetConfirmations(_steamClient);
         }
     }
-    
-    public async Task Refresh()
+
+    public async ValueTask<bool> CheckAndRefreshToken()
     {
-        if (_steamClient == null) return;
-        _ = await GetConfirmations(_steamClient);
+        IsLoading = true;
+
+        // 不具备检查条件 没有保持的会话信息
+        if (_steamClient == null)
+            return false;
+
+        if (_steamClient.Session == null || _steamAuthenticator == null)
+            return false;
+
+        try
+        {
+            // token 依旧有效 直接返回
+            if (!_steamClient.Session.IsAccessTokenExpired())
+                return true;
+
+            // 是否有 refresh token
+            string? refreshToken = _steamClient.Session?.RefreshToken;
+
+            if (string.IsNullOrWhiteSpace(refreshToken))
+                return false;
+
+            var session = _steamClient.Session;
+
+            // 刷新 access token (有效时间同样为一天)
+            await session!.RefreshAccessToken(_steamClient);
+
+            // 使用原先获取的具体派生类型 修改数据
+            _steamAuthenticator.SessionData = session.ToString();
+
+            // 重置当前 client
+            if (!ResetCurrentClient())
+            {
+                return false;
+            }
+
+            // 通过原始令牌引用保存信息
+            await AuthenticatorHelper.SaveAuthenticator(_authenticatorDto)
+                .ConfigureAwait(false);
+
+            return true;
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
-    public void SelectAll(bool isSelect)
+    public async Task Refresh()
     {
+        if (_steamClient?.IsLoggedIn() == true)
+            _ = await GetConfirmations(_steamClient);
+    }
+
+    public void SelectAllCommand()
+    {
+        var all = SelectedAll != true;
+        SelectedAll = all;
+
         foreach (var item in Confirmations)
         {
-            item.IsSelected = isSelect;
+            item.IsSelected = all;
         }
     }
 
@@ -70,194 +151,160 @@ public sealed partial class SteamTradePageViewModel
             Toast.Show(ToastIcon.Warning, Strings.User_LoginError_Null);
             return;
         }
-        if (IsLoading || IsLogged || _steamAuthenticator == null) return;
-        
-        _steamClient ??= _steamAuthenticator.GetClient();
-
-        SetToastServiceStatus(Strings.Logining);
-
-        IsLoading = true;
-        IsLogged = true;
-        var result = await RunTaskAndExceptionHandlingAsync(new Task<bool>(() =>
+        if (IsLoading || IsLogged || _steamAuthenticator == null)
         {
-            var loginResult = _steamClient.Login(UserNameText, PasswordText, _captchaId, CaptchaCodeText,
-                ResourceService.GetCurrentCultureSteamLanguageName());
-            return loginResult;
-        }));
-
-        if (_steamClient == null) return;
-        
-        if (!result)
+            return;
+        }
+        if (!string.IsNullOrEmpty(_steamAuthenticator.AccountName) && UserNameText != _steamAuthenticator.AccountName)
         {
-            IsLogged = result;
-            if (_steamClient.Error == "Incorrect Login")
-            {
-                Toast.Show(ToastIcon.Warning, Strings.User_LoginError);
-                return;
-            }
-
-            // if (_steamClient.RequiresCaptcha == true)
-            // {
-            //     _captchaId = _steamClient.CaptchaId;
-            //     CaptchaImageUrlText = _steamClient.CaptchaUrl;
-            //     Toast.Show(ToastIcon.None, Strings.User_LoginError_CodeImage);
-            //     SelectIndex = 1;
-            //     return;
-            // }
-
-            Toast.Show(ToastIcon.Error, AppResources.Error_UnknownLogin_.Format(_steamClient.Error));
-            IsLoading = false;
+            Toast.Show(ToastIcon.Warning, "请确保登录的账号与令牌内的账号一致");
+            return;
+        }
+        _steamClient ??= _steamAuthenticator.GetClient(ResourceService.GetCurrentCultureSteamLanguageName());
+        if (_steamClient == null)
+        {
             return;
         }
 
-        Toast.Show(ToastIcon.Success, string.Format(Strings.Success_, Strings.User_Login));
-            
-        SetToastServiceStatus();
+        IsLoading = true;
 
-        //_steamAuthenticator.SessionData = RemenberLogin ? result.steamClient.Session.ToString() : null;
-        _ = await GetConfirmations(_steamClient);
-        
+        var loginstate = new SteamLoginState()
+        {
+            Username = UserNameText,
+            Password = PasswordText,
+            Language = ResourceService.GetCurrentCultureSteamLanguageName(),
+        };
+
+        await _steamAccountService.DoLoginV2Async(loginstate);
+
+        if (loginstate.Requires2FA)
+        {
+            loginstate.TwofactorCode = _steamAuthenticator.CurrentCode;
+            await _steamAccountService.DoLoginV2Async(loginstate);
+        }
+
+        IsLogged = loginstate.Success;
+
+        if (IsLogged)
+        {
+            _steamClient.Session = new WSteamClient.SteamSession
+            {
+                AccessToken = loginstate.AccessToken,
+                RefreshToken = loginstate.RefreshToken,
+                SessionID = loginstate.SeesionId,
+                SteamID = loginstate.SteamId,
+            };
+
+            Toast.Show(ToastIcon.Success, string.Format(Strings.Success_, Strings.User_Login));
+            _steamAuthenticator.SessionData = RemenberLogin ? _steamClient.Session.ToString() : null;
+            await AuthenticatorHelper.SaveAuthenticator(_authenticatorDto!);
+            _steamClient = _steamAuthenticator.GetClient(ResourceService.GetCurrentCultureSteamLanguageName());
+            await GetConfirmations(_steamClient);
+        }
+        else
+        {
+            Toast.Show(ToastIcon.Error, AppResources.Error_UnknownLogin_.Format(loginstate.Message));
+            _steamClient.Logout();
+        }
+
         IsLoading = false;
     }
 
-    async Task<IEnumerable<SteamTradeConfirmationModel>?> GetConfirmations(WinAuth.SteamClient steamClient)
+    bool ResetCurrentClient()
+    {
+        try
+        {
+            if (_steamAuthenticator == null)
+                return false;
+
+            _steamClient?.Dispose();
+
+            // 重新生成 client
+            _steamClient = _steamAuthenticator
+                .GetClient(ResourceService.GetCurrentCultureSteamLanguageName());
+
+            if (_steamClient == null)
+                return false;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    async Task<IEnumerable<SteamTradeConfirmationModel>?> GetConfirmations(WSteamClient steamClient)
     {
         IsLoading = true;
-        SetToastServiceStatus(Strings.LocalAuth_AuthTrade_GetTip);
 
-        var result = await RunTaskAndExceptionHandlingAsync(
-            new Task<IEnumerable<SteamMobileTradeConf>>(steamClient.GetConfirmations));
-
-        if (result == null) return null;
-
-        //var models = result.Select(item => new SteamTradeConfirmationModel(_steamAuthenticator!, item)).ToList();
-        
-        Confirmations.Clear();
-        foreach (var item in result)
+        try
         {
-            Confirmations.Add(new SteamTradeConfirmationModel(_steamAuthenticator!, item));
+            var result = await steamClient.GetConfirmations();
+
+            if (result != null)
+            {
+                Confirmations.Clear();
+                Confirmations.Add(result.Select(item => new SteamTradeConfirmationModel(_steamAuthenticator!, item)));
+            }
         }
-        //Confirmations.AddRange(models);
-        
-        SetToastServiceStatus();
+        catch (WinAuthUnauthorisedSteamRequestException)
+        {
+            Toast.Show(ToastIcon.Error, AppResources.LocalAuth_AuthTrade_GetError3);
+            _steamClient?.Logout();
+            IsLogged = false;
+        }
+        catch (Exception ex)
+        {
+            ex.LogAndShowT();
+        }
+
         IsLoading = false;
 
         return Confirmations;
     }
 
-    void SetToastServiceStatus(string? statusMessage = null)
+    public async Task Logout()
     {
-        if (string.IsNullOrEmpty(statusMessage))
-        {
-            if (ToastService.IsSupported)
-            {
-                ToastService.Current.Set();
-            }
-            return;
-        }
-        if (ToastService.IsSupported)
-        {
-            ToastService.Current.Set(Strings.Logining);
-        }
-    }
-
-    async Task<T?> RunTaskAndExceptionHandlingAsync<T>(Task<T> task)
-    {
-        try
-        {
-            task.Start();
-            var result = await task;
-            return result;
-        }
-        catch (Exception e)
-        {
-            ExceptionHandling(e);
-            return default;
-        }
-    }
-
-    void ExceptionHandling(Exception exception, bool allowRetry = true)
-    {
-        //可能是启用了家庭监护功能
-        if (exception is WinAuthUnauthorisedSteamRequestException unauthorisedSteamRequestException)
-        {
-            Toast.Show(ToastIcon.Error, Strings.LocalAuth_AuthTrade_GetError);
-            return;
-        }
-
-        //可能是会话错误，重新尝试一次
-        if (exception is WinAuthInvalidSteamRequestException invalidSteamRequestException)
-        {
-            if (!allowRetry) return;
-            try
-            {
-                if (_steamClient!.IsLoggedIn())
-                {
-                    //_steamClient.Refresh();
-                    var list = _steamClient.GetConfirmations();
-
-                    //var models = list.Select(item => new SteamTradeConfirmationModel(_steamAuthenticator!, item));
-
-                    Confirmations.Clear();
-                    foreach (var item in list)
-                    {
-                        Confirmations.Add(new SteamTradeConfirmationModel(_steamAuthenticator!, item));
-                    }
-                    //Confirmations.AddRange(models);
-                }
-                else throw invalidSteamRequestException;
-            }
-            catch (Exception e)
-            {
-                Log.Error(nameof(SteamTradePageViewModel), e, "可能是没有开加速器导致无法连接 Steam 社区登录地址");
-                if (e.InnerException != null && e.Message.Contains("302"))
-                {
-                    Toast.Show(ToastIcon.Error, Strings.LocalAuth_AuthTrade_GetError3);
-                    IsLogged = false;
-                    _steamClient!.Clear();
-                }
-            }
-
-            return;
-        }
-
-        Log.Error(nameof(SteamTradePageViewModel), exception, nameof(ExceptionHandling));
-        Toast.Show(ToastIcon.Error, AppResources.Error_Exception_.Format(exception.Message));
-    }
-
-    // public async Task Logout()
-    // {
-    //     if (_steamClient == null) return;
-    //     if (await IWindowManager.Instance.ShowTaskDialogAsync(
-    //             new MessageBoxWindowViewModel() { Content = Strings.LocalAuth_LogoutTip, }, isCancelButton: true,
-    //             isDialog: false))
-    //     {
-    //         _steamClient.Logout();
-    //     }
-    // }
-
-    // void RefreshConfirmationsList()
-    // {
-    //     var items = _confirmationsSourceList.Items.Where(s => s.IsOperate == 0);
-    //     _confirmationsSourceList.Clear();
-    //     var confirmations = items.ToList();
-    //     if (confirmations.Any())
-    //         _confirmationsSourceList.AddRange(confirmations);
-    // }
-
-    public async Task ConfirmTrade(object sender)
-    {
-        if (sender is not SteamTradeConfirmationModel trade) return;
+        if (_steamClient == null || _steamAuthenticator == null) return;
         if (await IWindowManager.Instance.ShowTaskDialogAsync(
-                new MessageBoxWindowViewModel()
-                {
-                    Content = AppResources.ModelContent_ConfirmTrade___.Format(trade.SendSummary,
-                        trade.ReceiveSummary,
-                        trade.ReceiveNoItems
-                            ? $"您尚未让 {trade.Headline} 选择任何物品以交换您的物品。如果 {trade.Headline}  接受此交易，您将失去您提供的物品，但不会收到任何物品。"
-                            : string.Empty, trade.Warn ?? string.Empty)
-                }, AppResources.ConfirmTransaction,
-                isCancelButton: true, isDialog: false))
+                new MessageBoxWindowViewModel() { Content = Strings.LocalAuth_LogoutTip, }, AppResources.Logout, isCancelButton: true,
+                isDialog: false))
+        {
+            _steamClient.Logout();
+            _steamAuthenticator.SessionData = null;
+            await AuthenticatorHelper.SaveAuthenticator(_authenticatorDto!);
+            IsLogged = false;
+        }
+    }
+
+    //void RefreshConfirmationsList()
+    //{
+    //    var items = _confirmationsSourceList.Items.Where(s => s.IsOperate == 0);
+    //    _confirmationsSourceList.Clear();
+    //    var confirmations = items.ToList();
+    //    if (confirmations.Any())
+    //        _confirmationsSourceList.AddRange(confirmations);
+    //}
+
+    public async void ConfirmTrade(SteamTradeConfirmationModel trade)
+    {
+        if (trade.IsTrade)
+        {
+            if (await IWindowManager.Instance.ShowTaskDialogAsync(
+                        new MessageBoxWindowViewModel()
+                        {
+                            Content = AppResources.ModelContent_ConfirmTrade___.Format(trade.SendSummary,
+                                trade.ReceiveSummary,
+                                trade.ReceiveNoItems
+                                    ? AppResources.ModelContent_ConfirmTrade2_.Format(trade.Headline)
+                                    : string.Empty, trade.Warn ?? string.Empty)
+                        }, AppResources.ConfirmTransaction, isCancelButton: true, isDialog: false))
+            {
+                await OperationTrade(true, trade);
+            }
+        }
+        else
         {
             await OperationTrade(true, trade);
         }
@@ -265,35 +312,44 @@ public sealed partial class SteamTradePageViewModel
 
     public async Task ConfirmAllTrade()
     {
+        if (!Confirmations.Any_Nullable(x => x.IsSelected))
+        {
+            Toast.Show(ToastIcon.Warning, Strings.LocalAuth_AuthTrade_SelectNull);
+            return;
+        }
         if (await IWindowManager.Instance.ShowTaskDialogAsync(
                 new MessageBoxWindowViewModel() { Content = AppResources.ModelContent_ConfirmAllTrade },
-                isCancelButton: true, isDialog: false))
+                AppResources.ConfirmTransaction, isCancelButton: true, isDialog: false))
         {
-            await OperationTrade(true);
-        }
-    }
-
-    public async Task CancelTrade(object sender)
-    {
-        if (sender is not SteamTradeConfirmationModel trade) return;
-        if (await IWindowManager.Instance.ShowTaskDialogAsync(
-                new MessageBoxWindowViewModel() { Content = AppResources.ModelContent_CancelTrade },
-                isCancelButton: true, isDialog: false))
-        {
-            await OperationTrade(false, trade);
+            await OperationAllTrade(true);
         }
     }
 
     public async Task CancelAllTrade()
     {
+        if (!Confirmations.Any_Nullable(x => x.IsSelected))
+        {
+            Toast.Show(ToastIcon.Warning, Strings.LocalAuth_AuthTrade_SelectNull);
+            return;
+        }
         if (await IWindowManager.Instance.ShowTaskDialogAsync(
                 new MessageBoxWindowViewModel() { Content = AppResources.ModelContent_CancelAllTrade },
-                isCancelButton: true, isDialog: false))
+                AppResources.Cancel, isCancelButton: true, isDialog: false))
         {
-            await OperationTrade(false);
+            await OperationAllTrade(false);
         }
     }
-    
+
+    public async void CancelTrade(SteamTradeConfirmationModel trade)
+    {
+        if (await IWindowManager.Instance.ShowTaskDialogAsync(
+                new MessageBoxWindowViewModel() { Content = AppResources.ModelContent_CancelTrade },
+                AppResources.Cancel, isCancelButton: true, isDialog: false))
+        {
+            await OperationTrade(false, trade);
+        }
+    }
+
     async Task<bool> OperationTrade(bool status, SteamTradeConfirmationModel trade)
     {
         var result = await ChangeTradeStatus(status, trade);
@@ -307,85 +363,38 @@ public sealed partial class SteamTradePageViewModel
         return result;
     }
 
-    async Task OperationTrade(bool status)
+    async Task OperationAllTrade(bool status)
     {
-        if (!Confirmations.Any_Nullable())
-        {
-            Toast.Show(ToastIcon.Warning, Strings.LocalAuth_AuthTrade_Null);
-            return;
-        }
+        //if (!Confirmations.Any_Nullable())
+        //{
+        //    Toast.Show(ToastIcon.Warning, Strings.LocalAuth_AuthTrade_Null);
+        //    return;
+        //}
 
-        // if (_operationTradeAllCancelToken != null)
-        // {
-        //     Toast.Show(ToastIcon.Warning, AppResources.Warning_PleaseWaitExecuteFinish);
-        //     return;
-        // }
         var selectedList = Confirmations.Where(c => c.IsSelected).ToList();
 
         if (!selectedList.Any_Nullable())
         {
-            Toast.Show(ToastIcon.Warning, Strings.LocalAuth_AuthTrade_SelectNull);
+            //Toast.Show(ToastIcon.Warning, Strings.LocalAuth_AuthTrade_SelectNull);
             return;
         }
 
         var statusText = status ? Strings.BatchPass : Strings.BatchReject;
 
-        if (await IWindowManager.Instance.ShowTaskDialogAsync(
-                new MessageBoxWindowViewModel()
-                {
-                    Content = Strings.LocalAuth_AuthTrade_MessageBoxTip_.Format(statusText)
-                }, isCancelButton: true, isDialog: false))
-        {
-            SetToastServiceStatus(
-                Strings.LocalAuth_AuthTrade_ConfirmTip_.Format(statusText));
+        //if (await IWindowManager.Instance.ShowTaskDialogAsync(
+        //        new MessageBoxWindowViewModel()
+        //        {
+        //            Content = Strings.LocalAuth_AuthTrade_MessageBoxTip_.Format(statusText)
+        //        }, statusText, isCancelButton: true, isDialog: false))
+        //{
+        Toast.Show(ToastIcon.Info, Strings.LocalAuth_AuthTrade_ConfirmTip_.Format(statusText));
 
-            // _operationTradeAllCancelToken = new CancellationTokenSource();
-            // ushort success = 0;
-            // ushort failed = 0;
-            // //var executableNum = _confirmationsSourceList.Items.Count();
-            // foreach (var item in Confirmations)
-            // {
-            //     if (_operationTradeAllCancelToken.IsCancellationRequested)
-            //     {
-            //         Toast.Show(ToastIcon.Warning, AppResources.Warning_TerminationAllAuth___.Format(statusText, success, failed));
-            //         // Toast.Show(ToastIcon.None, 
-            //         //     $"已终止{statusText}全部令牌,已操作成功令牌数量{success},操作失败令牌数量{failed},剩余{executableNum - success - failed}令牌未操作");
-            //     }
-            //
-            //     // if (item.IsOperate != 0 || item.NotChecked)
-            //     // {
-            //     //     executableNum--;
-            //     //     continue;
-            //     // }
-            //
-            //     var startTime = DateTime.Now;
-            //
-            //     if (!await ChangeTradeStatus(status, item))
-            //     {
-            //         failed++;
-            //         continue;
-            //     }
-            //
-            //     //item.IsOperate = 1;
-            //     success++;
-            //     
-            //     var duration = (int)DateTime.Now.Subtract(startTime).TotalMilliseconds;
-            //     var delay = WinAuth.SteamClient.CONFIRMATION_EVENT_DELAY +
-            //                 Random2.Next(WinAuth.SteamClient.CONFIRMATION_EVENT_DELAY / 2);
-            //     if (delay > duration) await Task.Delay(delay - duration);
-            // }
-            //
-            // _operationTradeAllCancelToken = null;
-            //RefreshConfirmationsList();
-            if (!await ChangeTradeStatus(status, selectedList)) return;
-            Toast.Show(ToastIcon.Success,
-                AppResources.Success_ExecuteAllAuthEnd___.Format(statusText, selectedList.Count, 0));
-            // Toast.Show(ToastIcon.None, 
-            //     $"{statusText}全部令牌执行结束,成功数量{success},失败数量{failed},剩余{executableNum - success - failed}令牌未操作");
-            SetToastServiceStatus();
-        }
+        if (!await ChangeTradeStatus(status, selectedList)) return;
+        Toast.Show(ToastIcon.Success,
+            AppResources.Success_ExecuteAllAuthEnd___.Format(statusText, selectedList.Count, 0));
+        //}
     }
-    
+
     async Task<bool> ChangeTradeStatus(bool status, SteamTradeConfirmationModel trade)
     {
         if (!await ChangeTradeStatus(status, new[] { trade })) return false;
@@ -393,25 +402,29 @@ public sealed partial class SteamTradePageViewModel
         return true;
 
     }
-    
+
     async Task<bool> ChangeTradeStatus(bool status, IEnumerable<SteamTradeConfirmationModel> trades)
     {
         var steamTradeConfirmationModels = trades.ToList();
         var ids = steamTradeConfirmationModels.ToDictionary(item => item.Id, item => item.Nonce);
 
-        var task = Task.Run(() =>
+        try
         {
-            var result = _steamClient!.ConfirmTrade(ids, status);
-            Confirmations.Remove(steamTradeConfirmationModels);
+            var result = await _steamClient!.ConfirmTrade(ids, status);
+            if (result)
+            {
+                Confirmations.Remove(steamTradeConfirmationModels);
+            }
+            else
+            {
+                Toast.Show(ToastIcon.Error, Strings.LocalAuth_AuthTrade_ConfirmError);
+            }
             return result;
-        });
-        var result = await task;
-        if (!result) Toast.Show(ToastIcon.Error, Strings.LocalAuth_AuthTrade_ConfirmError);
-        if (task.Exception == null) return result;
-        Log.Error(nameof(SteamTradePageViewModel), task.Exception, nameof(ChangeTradeStatus));
-        Toast.Show(ToastIcon.Error, task.Exception.Message);
-        return result;
+        }
+        catch (Exception ex)
+        {
+            ex.LogAndShowT();
+            return false;
+        }
     }
-
-    public async Task ShowCaptchaUrl() => await AuthenticatorService.ShowCaptchaUrl(CaptchaImageUrlText);
 }

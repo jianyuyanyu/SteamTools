@@ -8,7 +8,6 @@
     xmlns:spp="https://steampp.net/ui"
     xmlns:ui="using:FluentAvalonia.UI.Controls"
     xmlns:wnd="using:FluentAvalonia.UI.Windowing"
-    x:Name="u"
     Title="{Binding Title}"
     Width="750"
     Height="500"
@@ -19,108 +18,64 @@
     WindowStartupLocation="CenterScreen"
     mc:Ignorable="d">
     <Grid RowDefinitions="Auto, *">
-        <Grid
+        <spp:TitleBar
             Name="TitleBarHost"
-            Height="{StaticResource TitleBarHeight}"
-            Background="Transparent"
-            ColumnDefinitions="Auto,Auto,*,Auto,150">
-            <Image
-                Name="WindowIcon"
-                Grid.Column="0"
-                Width="26"
-                Height="26"
-                Margin="22,4,12,4"
-                VerticalAlignment="Center"
-                DockPanel.Dock="Left"
-                IsHitTestVisible="False"
-                RenderOptions.BitmapInterpolationMode="HighQuality"
-                Source="avares://BD.WTTS.Client.Avalonia/UI/Assets/ApplicationIcon.ico" />
+            IsShowSearchBox="True"
+            SearchText="{Binding SearchText, Mode=TwoWay}">
+            <spp:TitleBar.ActionContent>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button
+                        Width="40"
+                        Height="40"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
+                        Command="{Binding RefreshStats_Click}"
+                        Theme="{DynamicResource TransparentButton}"
+                        ToolTip.Tip="{Binding Path=Res.Achievement_RefreshTip, Mode=OneWay, Source={x:Static s:ResourceService.Current}}">
+                        <Viewbox
+                            Width="22"
+                            Height="22"
+                            VerticalAlignment="Center">
+                            <ui:SymbolIcon Symbol="Refresh" />
+                        </Viewbox>
+                    </Button>
+                    <Button
+                        Width="40"
+                        Height="40"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
+                        Command="{Binding ResetAllStats_Click}"
+                        Theme="{DynamicResource TransparentButton}"
+                        ToolTip.Tip="{Binding Path=Res.Achievement_ResetTip, Mode=OneWay, Source={x:Static s:ResourceService.Current}}">
+                        <Viewbox
+                            Width="22"
+                            Height="22"
+                            VerticalAlignment="Center">
+                            <ui:SymbolIcon Symbol="Redo" />
+                        </Viewbox>
+                    </Button>
+                    <Button
+                        Width="40"
+                        Height="40"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
+                        Command="{Binding SaveChange_Click}"
+                        Theme="{DynamicResource TransparentButton}"
+                        ToolTip.Tip="{Binding Path=Res.Achievement_StoreTip, Mode=OneWay, Source={x:Static s:ResourceService.Current}}">
+                        <Viewbox
+                            Width="22"
+                            Height="22"
+                            VerticalAlignment="Center">
+                            <ui:SymbolIcon Symbol="SaveFilled" />
+                        </Viewbox>
+                    </Button>
+                </StackPanel>
+            </spp:TitleBar.ActionContent>
+        </spp:TitleBar>
 
-            <TextBlock
-                Grid.Column="1"
-                VerticalAlignment="Center"
-                FontSize="12"
-                IsHitTestVisible="False"
-                Text="{Binding Title, RelativeSource={RelativeSource FindAncestor, AncestorType=Window}}" />
-
-            <Border
-                Grid.Column="2"
-                Padding="6"
-                VerticalAlignment="Center">
-                <AutoCompleteBox
-                    Name="SearchBox"
-                    MaxWidth="500"
-                    VerticalAlignment="Center"
-                    wnd:AppWindow.AllowInteractionInTitleBar="True"
-                    Classes="Search"
-                    Text="{Binding SearchText, Mode=TwoWay}" />
-            </Border>
-
-            <DockPanel Grid.Column="3">
-                <Button
-                    Width="40"
-                    Height="40"
-                    HorizontalContentAlignment="Center"
-                    VerticalContentAlignment="Center"
-                    Command="{Binding RefreshStats_Click}"
-                    Theme="{DynamicResource TransparentButton}"
-                    ToolTip.Tip="{ReflectionBinding Path=Res.Achievement_RefreshTip,
-                                                    Mode=OneWay,
-                                                    Source={x:Static s:ResourceService.Current}}">
-                    <Viewbox
-                        Width="22"
-                        Height="22"
-                        VerticalAlignment="Center">
-                        <ui:SymbolIcon Symbol="Refresh" />
-                    </Viewbox>
-                </Button>
-                <Button
-                    Width="40"
-                    Height="40"
-                    HorizontalContentAlignment="Center"
-                    VerticalContentAlignment="Center"
-                    Command="{Binding ResetAllStats_Click}"
-                    Theme="{DynamicResource TransparentButton}"
-                    ToolTip.Tip="{ReflectionBinding Path=Res.Achievement_ResetTip,
-                                                    Mode=OneWay,
-                                                    Source={x:Static s:ResourceService.Current}}">
-                    <Viewbox
-                        Width="22"
-                        Height="22"
-                        VerticalAlignment="Center">
-                        <ui:SymbolIcon Symbol="Redo" />
-                    </Viewbox>
-                </Button>
-                <Button
-                    Width="40"
-                    Height="40"
-                    HorizontalContentAlignment="Center"
-                    VerticalContentAlignment="Center"
-                    Command="{Binding SaveChange_Click}"
-                    Theme="{DynamicResource TransparentButton}"
-                    ToolTip.Tip="{ReflectionBinding Path=Res.Achievement_StoreTip,
-                                                    Mode=OneWay,
-                                                    Source={x:Static s:ResourceService.Current}}">
-                    <Viewbox
-                        Width="22"
-                        Height="22"
-                        VerticalAlignment="Center">
-                        <ui:SymbolIcon Symbol="SaveFilled" />
-                    </Viewbox>
-                </Button>
-
-                <Separator
-                    Height="18"
-                    Margin="10,0"
-                    VerticalAlignment="Center"
-                    Classes="Vertical"
-                    DockPanel.Dock="Right"
-                    IsHitTestVisible="False" />
-            </DockPanel>
-        </Grid>
         <spp:ContentLoader Grid.Row="1" IsLoading="{Binding !!!Achievements.Count, Mode=OneWay}">
             <TabControl Padding="0">
-                <TabItem Header="{ReflectionBinding Path=Res.Achievement_Unlock, Mode=OneWay, Source={x:Static s:ResourceService.Current}}">
+                <TabItem Header="{Binding Path=Res.Achievement_Unlock, Mode=OneWay, Source={x:Static s:ResourceService.Current}}">
                     <DataGrid IsReadOnly="True" ItemsSource="{Binding Achievements}">
                         <DataGrid.Columns>
                             <!--  CheckBox  -->
@@ -129,8 +84,7 @@
                                     <ToggleSwitch
                                         VerticalAlignment="Center"
                                         Classes="OnlySwitch"
-                                        IsChecked="{ReflectionBinding #u.DataContext.IsCheckAll,
-                                                                      Mode=TwoWay}" />
+                                        IsChecked="{Binding $parent[Window].((spp:AchievementAppPageViewModel)DataContext).IsCheckAll, Mode=TwoWay}" />
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="spp:AchievementInfo">
@@ -151,7 +105,7 @@
                                 CanUserSort="True"
                                 SortMemberPath="IsChecked">
                                 <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="{ReflectionBinding Path=Res.Achievement_Icon, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" />
+                                    <TextBlock Text="{Binding Path=Res.Achievement_Icon, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" />
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="spp:AchievementInfo">
@@ -173,7 +127,7 @@
                                 CanUserSort="True"
                                 SortMemberPath="Name">
                                 <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="{ReflectionBinding Path=Res.Achievement_Name, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" />
+                                    <TextBlock Text="{Binding Path=Res.Achievement_Name, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" />
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="spp:AchievementInfo">
@@ -181,9 +135,7 @@
                                             <TextBlock
                                                 VerticalAlignment="Center"
                                                 IsVisible="{Binding IsProtection}"
-                                                Text="{ReflectionBinding Path=Res.Achievement_IsProtection,
-                                                                         Mode=OneWay,
-                                                                         Source={x:Static s:ResourceService.Current}}" />
+                                                Text="{Binding Path=Res.Achievement_IsProtection, Mode=OneWay, StringFormat={}({0}), Source={x:Static s:ResourceService.Current}}" />
                                             <StackPanel
                                                 VerticalAlignment="Center"
                                                 Orientation="Vertical"
@@ -205,7 +157,7 @@
                                 CanUserSort="True"
                                 SortMemberPath="Description">
                                 <DataGridTemplateColumn.Header>
-                                    <TextBlock Text="{ReflectionBinding Path=Res.Achievement_Description, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" />
+                                    <TextBlock Text="{Binding Path=Res.Achievement_Description, Mode=OneWay, Source={x:Static s:ResourceService.Current}}" />
                                 </DataGridTemplateColumn.Header>
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate x:DataType="spp:AchievementInfo">
@@ -220,7 +172,7 @@
                         </DataGrid.Columns>
                     </DataGrid>
                 </TabItem>
-                <TabItem Header="{ReflectionBinding Path=Res.Achievement_StatsEdit, Mode=OneWay, Source={x:Static s:ResourceService.Current}}">
+                <TabItem Header="{Binding Path=Res.Achievement_StatsEdit, Mode=OneWay, Source={x:Static s:ResourceService.Current}}">
                     <DataGrid IsReadOnly="False" ItemsSource="{Binding Statistics}">
                         <DataGrid.Columns>
                             <DataGridTextColumn

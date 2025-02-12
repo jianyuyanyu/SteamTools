@@ -146,8 +146,9 @@ public static partial class ServiceCollectionExtensions
         return services.AddSingleton<IFlowAnalyzer, FlowAnalyzer>();
     }
 
-#if !NOT_WINDOWS
+#if WINDOWS
 
+#if !REMOVE_DNS_INTERCEPT
     /// <summary>
     /// 注册数据包拦截器
     /// </summary>
@@ -170,6 +171,7 @@ public static partial class ServiceCollectionExtensions
 
         return services;
     }
+#endif
 
 #endif
 }

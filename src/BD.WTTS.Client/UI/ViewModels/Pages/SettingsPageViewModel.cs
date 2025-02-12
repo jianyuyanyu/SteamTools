@@ -13,13 +13,6 @@ public sealed partial class SettingsPageViewModel : TabItemViewModel
         this.WhenValueChanged(x => x.SelectLanguage, false)
               .Subscribe(x => UISettings.Language.Value = x.Key);
 
-        UpdateChannels = new[]
-        {
-            UpdateChannelType.Auto,
-            UpdateChannelType.GitHub,
-            UpdateChannelType.Official,
-        };
-
         OpenFolder_Click = ReactiveCommand.Create<string>(OpenFolder);
 
         CheckUpdate_Click = ReactiveCommand.Create(CheckUpdate);
@@ -41,12 +34,7 @@ public sealed partial class SettingsPageViewModel : TabItemViewModel
 
             SelectImage_Click = ReactiveCommand.CreateFromTask(async () =>
             {
-                FilePickerFileType fileTypes = new ValueTuple<string, string[]>[]
-                {
-                        ("Image Files", FileEx.Images.Select(s => $"*{s}").ToArray()),
-                    //("All Files", new[] { "*", }),
-                };
-                await FilePicker2.PickAsync(SetBackgroundImagePath, fileTypes);
+                await FilePicker2.PickAsync(SetBackgroundImagePath, IFilePickerFileType.Images());
             });
 
             ResetImage_Click = ReactiveCommand.Create(() => SetBackgroundImagePath(null));
@@ -73,9 +61,12 @@ public sealed partial class SettingsPageViewModel : TabItemViewModel
 #if (WINDOWS || MACCATALYST || MACOS || LINUX) && !(IOS || ANDROID)
     public async void SelectSteamProgramLocation()
     {
-        FilePickerFileType fileTypes = new ValueTuple<string, string[]>[]
-        {
-              ("Steam", new[] { "steam.exe" }),
+        AvaloniaFilePickerFileTypeFilter fileTypes = new AvaloniaFilePickerFileTypeFilter.Item[] {
+            new("Steam") {
+                Patterns = new[] { "steam.exe", },
+                //MimeTypes =
+                //AppleUniformTypeIdentifiers =
+                },
         };
         await FilePicker2.PickAsync((path) =>
         {

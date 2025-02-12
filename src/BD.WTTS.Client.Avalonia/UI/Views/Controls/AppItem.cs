@@ -21,6 +21,9 @@ public class AppItem : TemplatedControl
     public static readonly StyledProperty<Thickness> ImageMarginProperty =
         AvaloniaProperty.Register<AppItem, Thickness>(nameof(ImageMargin));
 
+    public static readonly StyledProperty<Stretch> ImageStretchProperty =
+        AvaloniaProperty.Register<AppItem, Stretch>(nameof(ImageStretch), Stretch.UniformToFill);
+
     public static readonly StyledProperty<bool> ExpandsProperty =
         AvaloniaProperty.Register<OptionsDisplayItem, bool>(nameof(Expands));
 
@@ -33,8 +36,11 @@ public class AppItem : TemplatedControl
     public static readonly StyledProperty<FlyoutBase?> MoreFlyoutProperty =
         AvaloniaProperty.Register<AppItem, FlyoutBase?>(nameof(MoreFlyout));
 
-    public static readonly StyledProperty<ICommand> ClickCommandProperty =
-        AvaloniaProperty.Register<AppItem, ICommand>(nameof(ClickCommand));
+    public static readonly StyledProperty<ICommand?> ClickCommandProperty =
+        Button.CommandProperty.AddOwner<AppItem>();
+
+    public static readonly StyledProperty<object?> ClickCommandParameterProperty =
+        Button.CommandParameterProperty.AddOwner<AppItem>();
 
     public static readonly StyledProperty<object?> ActionButtonProperty =
         AvaloniaProperty.Register<AppItem, object?>(nameof(ActionButton));
@@ -69,6 +75,12 @@ public class AppItem : TemplatedControl
         set => SetValue(ImageMarginProperty, value);
     }
 
+    public Stretch ImageStretch
+    {
+        get => GetValue(ImageStretchProperty);
+        set => SetValue(ImageStretchProperty, value);
+    }
+
     public bool Expands
     {
         get => GetValue(ExpandsProperty);
@@ -99,10 +111,16 @@ public class AppItem : TemplatedControl
         set => SetValue(MoreFlyoutProperty, value);
     }
 
-    public ICommand ClickCommand
+    public ICommand? ClickCommand
     {
         get => GetValue(ClickCommandProperty);
         set => SetValue(ClickCommandProperty, value);
+    }
+
+    public object? ClickCommandParameter
+    {
+        get => GetValue(ClickCommandParameterProperty);
+        set => SetValue(ClickCommandParameterProperty, value);
     }
 
     public static readonly RoutedEvent<RoutedEventArgs> NavigationRequestedEvent =
@@ -170,7 +188,7 @@ public class AppItem : TemplatedControl
             if (ClickCommand != null)
             {
                 RaiseEvent(new RoutedEventArgs(NavigationRequestedEvent, this));
-                ClickCommand.Execute(null);
+                ClickCommand.Execute(ClickCommandParameter);
             }
         }
     }
